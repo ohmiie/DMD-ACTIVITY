@@ -9,9 +9,8 @@
     "react-dom": "^19.0.0",
     "react-scripts": "^5.0.0",
     "firebase": "12.13.0",
-    "lucide-react": "1.17.0",
-    "lucide-react-native": "1.17.0"
-  },
+    "lucide-react": "1.17.0"
+      },
   "devDependencies": {
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
