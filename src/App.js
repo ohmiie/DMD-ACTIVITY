@@ -25,7 +25,7 @@ import {
   Download,
   Upload,
   Printer,
-  Trophy
+  Award
 } from "lucide-react";
 
 // --- Firebase Initialization ---
@@ -1050,6 +1050,7 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
   const [selectedActivity, setSelectedActivity] = useState("");
   const [taskDesc, setTaskDesc] = useState("");
   const [msg, setMsg] = useState("");
+  const [imgError, setImgError] = useState(false);
 
   const teachers = profiles.filter((p) => p.role === "teacher");
   const currentActivityObj = activities.find((a) => a.id === selectedActivity);
@@ -1173,19 +1174,20 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
           <div className="w-32 h-32 md:w-40 md:h-40 flex-shrink-0 bg-white rounded-full p-2 shadow-inner flex items-center justify-center relative">
             {/* วงแหวนตกแต่งรอบ Logo */}
             <div className={`absolute inset-0 rounded-full border-4 border-dashed ${rankInfo.iconColor} opacity-50 animate-[spin_10s_linear_infinite]`}></div>
-            <img 
-              src={rankInfo.image} 
-              alt={rankInfo.name} 
-              className="w-full h-full object-contain rounded-full relative z-10"
-              onError={(e) => {
-                e.target.style.display = 'none';
-                e.target.nextSibling.style.display = 'flex';
-              }}
-            />
-            {/* Fallback icon ถ้าโหลดภาพไม่ได้ */}
-            <div className="hidden absolute inset-0 flex items-center justify-center">
-              <Trophy className={`w-16 h-16 ${rankInfo.iconColor}`} />
-            </div>
+            
+            {!imgError ? (
+              <img 
+                src={rankInfo.image} 
+                alt={rankInfo.name} 
+                className="w-full h-full object-contain rounded-full relative z-10"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center z-10 bg-white rounded-full">
+                <Award className={`w-16 h-16 ${rankInfo.iconColor}`} />
+              </div>
+            )}
+
           </div>
           
           <div className="flex-1 text-center md:text-left">
