@@ -25,6 +25,7 @@ import {
   Download,
   Upload,
   Printer,
+  Trophy
 } from "lucide-react";
 
 // --- Firebase Initialization ---
@@ -394,8 +395,8 @@ const SidebarButton = ({ icon, label, active, onClick }) => (
   </button>
 );
 
-const Card = ({ children, title }) => (
-  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 md:p-6 mb-6">
+const Card = ({ children, title, className = "" }) => (
+  <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-4 md:p-6 mb-6 ${className}`}>
     {title && (
       <h3 className="text-xl font-bold text-gray-800 mb-4 pb-2 border-b">
         {title}
@@ -715,7 +716,6 @@ const AdminManageUsers = ({ role, profiles }) => {
   );
 };
 
-// Admin Report Component (เพิ่มปุ่มส่งออก CSV)
 const AdminReport = ({ records }) => {
   const handleExportCSV = () => {
     const headers = [
@@ -1053,9 +1053,58 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
 
   const teachers = profiles.filter((p) => p.role === "teacher");
   const currentActivityObj = activities.find((a) => a.id === selectedActivity);
+  
+  // คำนวณชั่วโมงสะสม
   const totalHours = records
     .filter((r) => r.studentId === user.userId && r.status === "approved")
     .reduce((sum, r) => sum + r.hours, 0);
+
+  // ฟังก์ชันคำนวณ Rank
+  const getRankInfo = (hours) => {
+    if (hours <= 40) {
+      return {
+        level: "Rank 1",
+        name: "หนูคือ นกกระจอก ค่ะลูก",
+        message: "เริ่มบินแล้ว แต่ยังต้องสะสมพลังจากการทำกิจกรรมอีกหน่อย",
+        image: "Rank (1).png",
+        bgColor: "from-amber-100 to-amber-50",
+        textColor: "text-amber-800",
+        iconColor: "text-amber-500"
+      };
+    } else if (hours <= 60) {
+      return {
+        level: "Rank 2",
+        name: "คุณคือพญาเหยี่ยว",
+        message: "เริ่มเฉียบคมและมุ่งมั่น ทำกิจกรรมต่อเนื่องอีกนิดจะไปได้ไกล",
+        image: "Rank (2).png",
+        bgColor: "from-slate-200 to-slate-100",
+        textColor: "text-slate-800",
+        iconColor: "text-slate-500"
+      };
+    } else if (hours <= 80) {
+      return {
+        level: "Rank 3",
+        name: "คุณคือพญาเสือเบงกอล",
+        message: "พลังมาเต็มแล้ว คุณคือสายลุยกิจกรรมตัวจริง",
+        image: "Rank (3).png",
+        bgColor: "from-orange-200 to-orange-100",
+        textColor: "text-orange-800",
+        iconColor: "text-orange-500"
+      };
+    } else {
+      return {
+        level: "Rank 4",
+        name: "คุณคือพญามังกรผงาด",
+        message: "คุณคือระดับสูงสุดของกิจกรรม โดดเด่น สม่ำเสมอ และเป็นแบบอย่างที่ดี",
+        image: "Rank (4).png",
+        bgColor: "from-red-200 to-red-100",
+        textColor: "text-red-800",
+        iconColor: "text-red-500"
+      };
+    }
+  };
+
+  const rankInfo = getRankInfo(totalHours);
 
   const mySubmittedActivityIds = records
     .filter((r) => r.studentId === user.userId)
@@ -1089,23 +1138,97 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
 
   return (
     <div>
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-6 mb-6 text-white flex flex-col md:flex-row justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">
-            {user.firstName} {user.lastName}
-          </h2>
-          <p>
-            {user.userId} | สาขา {user.major}
-          </p>
-        </div>
-        <div className="mt-4 md:mt-0 md:text-right">
-          <p>เวลาสะสม</p>
-          <p className="text-4xl font-extrabold flex items-center">
-            <Clock className="mr-2" /> {totalHours} ชม.
-          </p>
+      {/* ส่วนแสดงข้อมูลผู้ใช้และเวลาสะสม (ปรับปรุงใหม่) */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-6 mb-6 text-white shadow-md relative overflow-hidden">
+        {/* Decorative elements */}
+        <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-xl"></div>
+        <div className="absolute bottom-0 left-0 -mb-4 -ml-4 w-32 h-32 bg-indigo-400 opacity-20 rounded-full blur-xl"></div>
+        
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center">
+          <div>
+            <h2 className="text-3xl font-bold mb-1">
+              {user.firstName} {user.lastName}
+            </h2>
+            <p className="text-blue-100 flex items-center">
+              <span className="bg-blue-800 bg-opacity-50 px-2 py-1 rounded text-sm mr-2">{user.userId}</span>
+              <span>สาขา {user.major}</span>
+            </p>
+          </div>
+          
+          <div className="mt-6 md:mt-0 bg-white bg-opacity-20 backdrop-blur-sm rounded-lg p-4 text-center md:text-right min-w-[150px]">
+            <p className="text-blue-100 text-sm font-medium uppercase tracking-wider mb-1">เวลาสะสมทั้งหมด</p>
+            <div className="text-4xl font-extrabold flex items-center justify-center md:justify-end">
+              <Clock className="mr-2 h-8 w-8 text-yellow-300" /> 
+              <span>{totalHours} <span className="text-xl font-normal">ชม.</span></span>
+            </div>
+          </div>
         </div>
       </div>
-      <Card title="บันทึกกิจกรรม">
+
+      {/* ส่วนแสดง Rank */}
+      <Card className={`bg-gradient-to-br ${rankInfo.bgColor} border-none shadow-md overflow-hidden relative`}>
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-40 rounded-full -mr-10 -mt-10 blur-2xl"></div>
+        
+        <div className="relative z-10 flex flex-col md:flex-row items-center gap-6">
+          <div className="w-32 h-32 md:w-40 md:h-40 flex-shrink-0 bg-white rounded-full p-2 shadow-inner flex items-center justify-center relative">
+            {/* วงแหวนตกแต่งรอบ Logo */}
+            <div className={`absolute inset-0 rounded-full border-4 border-dashed ${rankInfo.iconColor} opacity-50 animate-[spin_10s_linear_infinite]`}></div>
+            <img 
+              src={rankInfo.image} 
+              alt={rankInfo.name} 
+              className="w-full h-full object-contain rounded-full relative z-10"
+              onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.nextSibling.style.display = 'flex';
+              }}
+            />
+            {/* Fallback icon ถ้าโหลดภาพไม่ได้ */}
+            <div className="hidden absolute inset-0 flex items-center justify-center">
+              <Trophy className={`w-16 h-16 ${rankInfo.iconColor}`} />
+            </div>
+          </div>
+          
+          <div className="flex-1 text-center md:text-left">
+            <div className={`inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-2 bg-white ${rankInfo.textColor} shadow-sm`}>
+              {rankInfo.level}
+            </div>
+            <h3 className={`text-2xl md:text-3xl font-extrabold ${rankInfo.textColor} mb-2`}>
+              {rankInfo.name}
+            </h3>
+            <p className={`text-sm md:text-base font-medium ${rankInfo.textColor} opacity-90 bg-white bg-opacity-40 p-3 rounded-lg inline-block md:block`}>
+              "{rankInfo.message}"
+            </p>
+            
+            {/* Progress bar to next rank (optional, adds more motivation) */}
+            {totalHours <= 80 && (
+              <div className="mt-4">
+                <div className="flex justify-between text-xs mb-1 font-medium text-gray-600">
+                  <span>ความคืบหน้า</span>
+                  <span>
+                    {totalHours <= 40 ? "เป้าหมาย: 41 ชม." : 
+                     totalHours <= 60 ? "เป้าหมาย: 61 ชม." : 
+                     "เป้าหมาย: 81 ชม."}
+                  </span>
+                </div>
+                <div className="w-full bg-white bg-opacity-50 rounded-full h-2.5">
+                  <div 
+                    className={`h-2.5 rounded-full ${totalHours <= 40 ? 'bg-amber-500' : totalHours <= 60 ? 'bg-slate-500' : 'bg-orange-500'}`} 
+                    style={{ 
+                      width: `${
+                        totalHours <= 40 ? (totalHours/41)*100 : 
+                        totalHours <= 60 ? ((totalHours-40)/21)*100 : 
+                        ((totalHours-60)/21)*100
+                      }%` 
+                    }}
+                  ></div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <Card title="บันทึกกิจกรรมใหม่">
         <form onSubmit={handleSubmit} className="space-y-4">
           <select
             value={selectedTeacher}
@@ -1114,7 +1237,7 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
               setSelectedActivity("");
             }}
             required
-            className="w-full p-3 border rounded-lg bg-gray-50"
+            className="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
           >
             <option value="">-- 1. เลือกอาจารย์ --</option>
             {teachers.map((t) => (
@@ -1128,7 +1251,7 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
             onChange={(e) => setSelectedActivity(e.target.value)}
             required
             disabled={!selectedTeacher}
-            className="w-full p-3 border rounded-lg bg-gray-50"
+            className="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow disabled:opacity-50"
           >
             <option value="">-- 2. เลือกกิจกรรม --</option>
             {availableActivities.map((a) => (
@@ -1139,33 +1262,37 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
           </select>
 
           {selectedTeacher && availableActivities.length === 0 && (
-            <p className="text-sm text-amber-600 bg-amber-50 p-2 rounded">
+            <p className="text-sm text-amber-600 bg-amber-50 p-3 rounded-lg border border-amber-100">
               ไม่มีกิจกรรมใหม่ให้เลือก
-              (คุณได้กรอกกิจกรรมของอาจารย์ท่านนี้ครบหมดแล้ว)
+              (คุณได้กรอกกิจกรรมของอาจารย์ท่านนี้ครบหมดแล้ว หรืออาจารย์ยังไม่ได้สร้างกิจกรรมใหม่)
             </p>
           )}
 
           <textarea
             rows="3"
             required
-            placeholder="3. ภาระหน้าที่ที่ได้รับมอบหมาย..."
+            placeholder="3. ระบุภาระหน้าที่ที่ได้รับมอบหมาย..."
             value={taskDesc}
             onChange={(e) => setTaskDesc(e.target.value)}
-            className="w-full p-3 border rounded-lg bg-gray-50"
+            className="w-full p-3 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow resize-none"
           ></textarea>
           <div className="flex items-center">
             <button
               type="submit"
               disabled={!selectedActivity}
-              className={`font-bold px-6 py-3 rounded-lg text-white ${
+              className={`font-bold px-6 py-3 rounded-lg text-white shadow-md transition-all ${
                 selectedActivity
-                  ? "bg-green-600 hover:bg-green-700"
+                  ? "bg-green-600 hover:bg-green-700 hover:shadow-lg transform hover:-translate-y-0.5"
                   : "bg-gray-400 cursor-not-allowed"
               }`}
             >
-              บันทึกเพื่อรออนุมัติ
+              ส่งบันทึกเพื่อรออนุมัติ
             </button>
-            {msg && <span className="ml-4 text-green-600">{msg}</span>}
+            {msg && (
+              <span className="ml-4 text-green-600 flex items-center bg-green-50 px-3 py-2 rounded-lg">
+                <CheckCircle className="w-5 h-5 mr-1" /> {msg}
+              </span>
+            )}
           </div>
         </form>
       </Card>
@@ -1193,16 +1320,20 @@ const StudentHistory = ({ user, records }) => {
             key={r.id}
             className={`border p-4 rounded-lg flex flex-col md:flex-row gap-4 ${
               r.status === "approved"
-                ? "bg-green-50"
+                ? "bg-green-50 border-green-200"
                 : r.status === "rejected"
-                ? "bg-red-50"
-                : "bg-white"
-            }`}
+                ? "bg-red-50 border-red-200"
+                : "bg-white border-gray-200"
+            } transition-shadow hover:shadow-md`}
           >
             <div className="flex-1">
-              <div className="flex justify-between">
-                <h4 className="font-bold">{r.activityName}</h4>
-                <span className="text-xs px-2 py-1 bg-gray-200 rounded">
+              <div className="flex justify-between items-start mb-1">
+                <h4 className="font-bold text-gray-800 text-lg">{r.activityName}</h4>
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                  r.status === "approved" ? "bg-green-100 text-green-700" :
+                  r.status === "rejected" ? "bg-red-100 text-red-700" :
+                  "bg-yellow-100 text-yellow-700"
+                }`}>
                   {r.status === "approved"
                     ? "อนุมัติแล้ว"
                     : r.status === "rejected"
@@ -1210,47 +1341,64 @@ const StudentHistory = ({ user, records }) => {
                     : "รอตรวจ"}
                 </span>
               </div>
-              <p className="text-sm text-gray-600">อ. {r.teacherName}</p>
+              <p className="text-sm text-gray-600 mb-2 flex items-center">
+                <Users className="w-4 h-4 mr-1 inline" /> อ. {r.teacherName}
+              </p>
+              
               {editingId === r.id ? (
-                <div className="mt-2 flex gap-2">
+                <div className="mt-3 flex flex-col sm:flex-row gap-2">
                   <input
                     value={editDesc}
                     onChange={(e) => setEditDesc(e.target.value)}
-                    className="flex-1 p-2 border rounded"
+                    className="flex-1 p-2 border rounded focus:ring-2 focus:ring-blue-400 outline-none"
+                    placeholder="แก้ไขรายละเอียดงาน..."
                   />
-                  <button
-                    onClick={() => handleSave(r.id)}
-                    className="bg-blue-500 text-white px-2 rounded"
-                  >
-                    บันทึก
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleSave(r.id)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                    >
+                      บันทึก
+                    </button>
+                    <button
+                      onClick={() => setEditingId(null)}
+                      className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded transition-colors"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <div className="mt-2 p-2 bg-white/50 rounded flex justify-between">
-                  <p className="text-sm">{r.taskDescription}</p>
+                <div className="mt-3 p-3 bg-white bg-opacity-60 rounded-lg flex justify-between items-start border border-black/5">
+                  <p className="text-sm text-gray-700 leading-relaxed">{r.taskDescription}</p>
                   {r.status === "pending" && (
                     <button
                       onClick={() => {
                         setEditingId(r.id);
                         setEditDesc(r.taskDescription);
                       }}
-                      className="text-blue-500 text-sm"
+                      className="text-blue-600 hover:text-blue-800 text-sm ml-4 flex items-center flex-shrink-0"
                     >
-                      แก้ไข
+                      <Edit2 className="w-4 h-4 mr-1" /> แก้ไข
                     </button>
                   )}
                 </div>
               )}
             </div>
-            <div className="text-center md:min-w-[80px]">
-              <span className="text-2xl font-black text-indigo-600">
+            <div className="flex flex-row md:flex-col items-center justify-center md:min-w-[100px] border-t md:border-t-0 md:border-l border-gray-200 pt-3 md:pt-0 pl-0 md:pl-4 mt-2 md:mt-0">
+              <span className="text-3xl font-black text-indigo-600 mr-2 md:mr-0">
                 {r.hours}
               </span>
-              <br />
-              <span className="text-xs text-gray-500">ชั่วโมง</span>
+              <span className="text-sm text-gray-500 font-medium">ชั่วโมง</span>
             </div>
           </div>
         ))}
+        {myRecords.length === 0 && (
+          <div className="text-center py-10 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+            <Clock className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500 font-medium">ยังไม่มีประวัติการทำกิจกรรม</p>
+          </div>
+        )}
       </div>
     </Card>
   );
