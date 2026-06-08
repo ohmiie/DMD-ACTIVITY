@@ -863,6 +863,15 @@ const TeacherDashboard = ({ user, activities }) => {
     date: today,
   });
 
+  // State สำหรับการแก้ไขกิจกรรม
+  const [editingId, setEditingId] = useState(null);
+  const [editData, setEditData] = useState({
+    activityName: "",
+    location: "",
+    hours: 1,
+    date: "",
+  });
+
   const myActivities = useMemo(
     () => activities.filter((a) => a.teacherId === user.userId),
     [activities, user]
@@ -877,6 +886,17 @@ const TeacherDashboard = ({ user, activities }) => {
       teacherName: `${user.firstName} ${user.lastName}`,
     });
     setFormData({ activityName: "", location: "", hours: 1, date: today });
+  };
+
+  // ฟังก์ชันบันทึกการแก้ไข
+  const handleUpdate = async (id) => {
+    await updateDoc(doc(db, ACTIVITIES_PATH, id), {
+      activityName: editData.activityName,
+      location: editData.location,
+      hours: Number(editData.hours),
+      date: editData.date,
+    });
+    setEditingId(null);
   };
 
   return (
@@ -956,7 +976,7 @@ const TeacherDashboard = ({ user, activities }) => {
                 <th className="p-3">ชื่อกิจกรรม</th>
                 <th className="p-3">สถานที่</th>
                 <th className="p-3 text-center">ชั่วโมง</th>
-                <th className="p-3 text-center">ลบ</th>
+                <th className="p-3 text-center">จัดการ</th>
               </tr>
             </thead>
             <tbody>
@@ -964,25 +984,65 @@ const TeacherDashboard = ({ user, activities }) => {
                 .sort((a, b) => new Date(b.date) - new Date(a.date))
                 .map((a) => (
                   <tr key={a.id} className="border-b">
-                    <td className="p-3 text-gray-600">
-                      {new Date(a.date).toLocaleDateString("th-TH")}
-                    </td>
-                    <td className="p-3 font-medium">{a.activityName}</td>
-                    <td className="p-3">{a.location}</td>
-                    <td className="p-3 text-center text-indigo-700 font-bold">
-                      {a.hours}
-                    </td>
-                    <td className="p-3 text-center">
-                      <button
-                        onClick={() => {
-                          if (window.confirm("ลบ?"))
-                            deleteDoc(doc(db, ACTIVITIES_PATH, a.id));
-                        }}
-                        className="text-red-500"
-                      >
-                        <Trash2 size={18} className="mx-auto" />
-                      </button>
-                    </td>
+                    {editingId === a.id ? (
+                      // โหมดแก้ไข
+                      <>
+                        <td className="p-2">
+                          <input type="date" value={editData.date} onChange={(e) => setEditData({...editData, date: e.target.value})} className="w-full p-1 border rounded text-sm" />
+                        </td>
+                        <td className="p-2">
+                          <input type="text" value={editData.activityName} onChange={(e) => setEditData({...editData, activityName: e.target.value})} className="w-full p-1 border rounded text-sm" />
+                        </td>
+                        <td className="p-2">
+                          <input type="text" value={editData.location} onChange={(e) => setEditData({...editData, location: e.target.value})} className="w-full p-1 border rounded text-sm" />
+                        </td>
+                        <td className="p-2">
+                          <input type="number" min="1" value={editData.hours} onChange={(e) => setEditData({...editData, hours: e.target.value})} className="w-full p-1 border rounded text-sm text-center" />
+                        </td>
+                        <td className="p-2 text-center flex gap-2 justify-center items-center mt-1">
+                          <button onClick={() => handleUpdate(a.id)} className="text-green-600 hover:text-green-800" title="บันทึก">
+                            <CheckCircle size={18} />
+                          </button>
+                          <button onClick={() => setEditingId(null)} className="text-gray-500 hover:text-gray-700" title="ยกเลิก">
+                            <XCircle size={18} />
+                          </button>
+                        </td>
+                      </>
+                    ) : (
+                      // โหมดแสดงผลปกติ
+                      <>
+                        <td className="p-3 text-gray-600">
+                          {new Date(a.date).toLocaleDateString("th-TH")}
+                        </td>
+                        <td className="p-3 font-medium">{a.activityName}</td>
+                        <td className="p-3">{a.location}</td>
+                        <td className="p-3 text-center text-indigo-700 font-bold">
+                          {a.hours}
+                        </td>
+                        <td className="p-3 text-center flex gap-2 justify-center">
+                          <button
+                            onClick={() => {
+                              setEditingId(a.id);
+                              setEditData({ activityName: a.activityName, location: a.location, hours: a.hours, date: a.date });
+                            }}
+                            className="text-blue-500 hover:text-blue-700"
+                            title="แก้ไข"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm("ต้องการลบกิจกรรมนี้ใช่หรือไม่?"))
+                                deleteDoc(doc(db, ACTIVITIES_PATH, a.id));
+                            }}
+                            className="text-red-500 hover:text-red-700"
+                            title="ลบ"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
             </tbody>
@@ -1060,9 +1120,19 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
     .filter((r) => r.studentId === user.userId && r.status === "approved")
     .reduce((sum, r) => sum + r.hours, 0);
 
-  // ฟังก์ชันคำนวณ Rank
+  // ฟังก์ชันคำนวณ Rank (อัพเดทใหม่)
   const getRankInfo = (hours) => {
-    if (hours <= 40) {
+    if (hours <= 3) {
+      return {
+        level: "Rank 0",
+        name: "หนูคือสลอตที่ยังไม่ตื่นไปทำกิจกรรมค่ะคุณลูก",
+        message: "สลอตยังหลับ... แต่นักเรียนห้ามหลับตามนะ!เตรียมตัวให้พร้อม แล้วมาร่วมกิจกรรมเพื่อฝึกความรู้และความคล่องตัวกันเถอะ",
+        image: "Rank (0).png",
+        bgColor: "from-gray-200 to-gray-100",
+        textColor: "text-gray-800",
+        iconColor: "text-gray-500"
+      };
+    } else if (hours <= 40) {
       return {
         level: "Rank 1",
         name: "หนูคือ นกกระจอก ค่ะลูก",
@@ -1139,7 +1209,7 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
 
   return (
     <div>
-      {/* ส่วนแสดงข้อมูลผู้ใช้และเวลาสะสม (ปรับปรุงใหม่) */}
+      {/* ส่วนแสดงข้อมูลผู้ใช้และเวลาสะสม */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-6 mb-6 text-white shadow-md relative overflow-hidden">
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-xl"></div>
@@ -1201,22 +1271,29 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
               "{rankInfo.message}"
             </p>
             
-            {/* Progress bar to next rank (optional, adds more motivation) */}
+            {/* Progress bar to next rank */}
             {totalHours <= 80 && (
               <div className="mt-4">
                 <div className="flex justify-between text-xs mb-1 font-medium text-gray-600">
                   <span>ความคืบหน้า</span>
                   <span>
-                    {totalHours <= 40 ? "เป้าหมาย: 41 ชม." : 
+                    {totalHours <= 3 ? "เป้าหมาย: 4 ชม." : 
+                     totalHours <= 40 ? "เป้าหมาย: 41 ชม." : 
                      totalHours <= 60 ? "เป้าหมาย: 61 ชม." : 
                      "เป้าหมาย: 81 ชม."}
                   </span>
                 </div>
                 <div className="w-full bg-white bg-opacity-50 rounded-full h-2.5">
                   <div 
-                    className={`h-2.5 rounded-full ${totalHours <= 40 ? 'bg-amber-500' : totalHours <= 60 ? 'bg-slate-500' : 'bg-orange-500'}`} 
+                    className={`h-2.5 rounded-full ${
+                      totalHours <= 3 ? 'bg-gray-500' : 
+                      totalHours <= 40 ? 'bg-amber-500' : 
+                      totalHours <= 60 ? 'bg-slate-500' : 
+                      'bg-orange-500'
+                    }`} 
                     style={{ 
                       width: `${
+                        totalHours <= 3 ? (totalHours/4)*100 : 
                         totalHours <= 40 ? (totalHours/41)*100 : 
                         totalHours <= 60 ? ((totalHours-40)/21)*100 : 
                         ((totalHours-60)/21)*100
