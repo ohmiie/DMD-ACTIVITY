@@ -361,7 +361,7 @@ export default function App() {
           <TeacherApprovals user={appUser} records={records} />
         )}
         {appUser.role === "teacher" && activeTab === "report" && (
-          <TeacherReport user={appUser} records={records} />
+          <TeacherReport user={appUser} records={records} profiles={profiles} />
         )}
 
         {/* Student Views */}
@@ -717,6 +717,13 @@ const AdminManageUsers = ({ role, profiles }) => {
 };
 
 const AdminReport = ({ records }) => {
+  const [editingId, setEditingId] = useState(null);
+  const [editData, setEditData] = useState({
+    taskDescription: "",
+    hours: 0,
+    status: "pending"
+  });
+
   const handleExportCSV = () => {
     const headers = [
       "อ.ผู้ดูแล",
@@ -766,6 +773,29 @@ const AdminReport = ({ records }) => {
     link.click();
   };
 
+  const handleUpdateRecord = async (id) => {
+    try {
+      await updateDoc(doc(db, RECORDS_PATH, id), {
+        taskDescription: editData.taskDescription,
+        hours: Number(editData.hours),
+        status: editData.status
+      });
+      setEditingId(null);
+    } catch(err) {
+      alert("เกิดข้อผิดพลาดในการอัปเดตข้อมูล");
+    }
+  };
+
+  const handleDeleteRecord = async (id) => {
+    if (window.confirm("คุณแน่ใจหรือไม่ว่าต้องการลบรายการกิจกรรมนี้? การกระทำนี้ไม่สามารถย้อนกลับได้")) {
+      try {
+        await deleteDoc(doc(db, RECORDS_PATH, id));
+      } catch(err) {
+        alert("เกิดข้อผิดพลาดในการลบข้อมูล");
+      }
+    }
+  };
+
   return (
     <Card>
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 print:hidden gap-4">
@@ -805,6 +835,7 @@ const AdminReport = ({ records }) => {
                 ชั่วโมง
               </th>
               <th className="p-3 border border-gray-300">สถานะ</th>
+              <th className="p-3 border border-gray-300 text-center print:hidden">จัดการ</th>
             </tr>
           </thead>
           <tbody>
@@ -812,36 +843,108 @@ const AdminReport = ({ records }) => {
               .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
               .map((r) => (
                 <tr key={r.id} className="border-b">
-                  <td className="p-3 border border-gray-300 text-indigo-700 font-medium">
-                    {r.teacherName}
-                  </td>
-                  <td className="p-3 border border-gray-300">{r.studentId}</td>
-                  <td className="p-3 border border-gray-300">
-                    {r.studentName}
-                  </td>
-                  <td className="p-3 border border-gray-300">
-                    {r.activityName}
-                  </td>
-                  <td className="p-3 border border-gray-300 text-sm whitespace-normal min-w-[200px]">
-                    {r.taskDescription}
-                  </td>
-                  <td className="p-3 border border-gray-300 text-center font-bold">
-                    {r.hours}
-                  </td>
-                  <td className="p-3 border border-gray-300 font-medium text-sm">
-                    {r.status === "approved" ? (
-                      <span className="text-green-600">อนุมัติ</span>
-                    ) : r.status === "rejected" ? (
-                      <span className="text-red-600">ไม่อนุมัติ</span>
-                    ) : (
-                      <span className="text-yellow-600">รอตรวจสอบ</span>
-                    )}
-                  </td>
+                  {editingId === r.id ? (
+                    // โหมดแก้ไขกิจกรรม (Admin Edit Mode)
+                    <>
+                      <td className="p-3 border border-gray-300 text-gray-500">{r.teacherName}</td>
+                      <td className="p-3 border border-gray-300 text-gray-500">{r.studentId}</td>
+                      <td className="p-3 border border-gray-300 text-gray-500">{r.studentName}</td>
+                      <td className="p-3 border border-gray-300 text-gray-500">{r.activityName}</td>
+                      <td className="p-2 border border-gray-300">
+                        <input 
+                          type="text" 
+                          value={editData.taskDescription} 
+                          onChange={(e) => setEditData({...editData, taskDescription: e.target.value})}
+                          className="w-full p-1 border rounded text-sm min-w-[200px]"
+                        />
+                      </td>
+                      <td className="p-2 border border-gray-300 text-center">
+                        <input 
+                          type="number" 
+                          min="1" 
+                          value={editData.hours} 
+                          onChange={(e) => setEditData({...editData, hours: e.target.value})}
+                          className="w-16 p-1 border rounded text-sm text-center mx-auto"
+                        />
+                      </td>
+                      <td className="p-2 border border-gray-300">
+                        <select 
+                          value={editData.status} 
+                          onChange={(e) => setEditData({...editData, status: e.target.value})}
+                          className="w-full p-1 border rounded text-sm"
+                        >
+                          <option value="pending">รอตรวจสอบ</option>
+                          <option value="approved">อนุมัติ</option>
+                          <option value="rejected">ไม่อนุมัติ</option>
+                        </select>
+                      </td>
+                      <td className="p-2 border border-gray-300 text-center flex gap-2 justify-center items-center print:hidden">
+                        <button onClick={() => handleUpdateRecord(r.id)} className="text-green-600 hover:text-green-800" title="บันทึก">
+                          <CheckCircle size={18} />
+                        </button>
+                        <button onClick={() => setEditingId(null)} className="text-gray-500 hover:text-gray-700" title="ยกเลิก">
+                          <XCircle size={18} />
+                        </button>
+                      </td>
+                    </>
+                  ) : (
+                    // โหมดแสดงผลปกติ
+                    <>
+                      <td className="p-3 border border-gray-300 text-indigo-700 font-medium">
+                        {r.teacherName}
+                      </td>
+                      <td className="p-3 border border-gray-300">{r.studentId}</td>
+                      <td className="p-3 border border-gray-300">
+                        {r.studentName}
+                      </td>
+                      <td className="p-3 border border-gray-300">
+                        {r.activityName}
+                      </td>
+                      <td className="p-3 border border-gray-300 text-sm whitespace-normal min-w-[200px]">
+                        {r.taskDescription}
+                      </td>
+                      <td className="p-3 border border-gray-300 text-center font-bold">
+                        {r.hours}
+                      </td>
+                      <td className="p-3 border border-gray-300 font-medium text-sm">
+                        {r.status === "approved" ? (
+                          <span className="text-green-600">อนุมัติ</span>
+                        ) : r.status === "rejected" ? (
+                          <span className="text-red-600">ไม่อนุมัติ</span>
+                        ) : (
+                          <span className="text-yellow-600">รอตรวจสอบ</span>
+                        )}
+                      </td>
+                      <td className="p-3 border border-gray-300 text-center flex gap-2 justify-center print:hidden">
+                        <button 
+                          onClick={() => {
+                            setEditingId(r.id);
+                            setEditData({
+                              taskDescription: r.taskDescription || "",
+                              hours: r.hours || 1,
+                              status: r.status || "pending"
+                            });
+                          }}
+                          className="text-blue-500 hover:text-blue-700"
+                          title="แก้ไขรายการ"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteRecord(r.id)}
+                          className="text-red-500 hover:text-red-700"
+                          title="ลบรายการ"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             {records.length === 0 && (
               <tr>
-                <td colSpan="7" className="text-center p-4 text-gray-500">
+                <td colSpan="8" className="text-center p-4 text-gray-500">
                   ไม่มีข้อมูลกิจกรรมในระบบ
                 </td>
               </tr>
@@ -1099,6 +1202,134 @@ const TeacherApprovals = ({ user, records }) => {
         {myPending.length === 0 && (
           <p className="text-center text-gray-500">ไม่มีรายการรออนุมัติ</p>
         )}
+      </div>
+    </Card>
+  );
+};
+
+// Teacher Report Component (เพิ่มชั้น/ห้อง และรับ props `profiles` มาใช้งาน)
+const TeacherReport = ({ user, records, profiles }) => {
+  const myRecords = records.filter((r) => r.teacherId === user.userId);
+
+  const handleExportCSV = () => {
+    const headers = [
+      "รหัสนักศึกษา",
+      "ชื่อ-นามสกุล",
+      "ชั้น/ห้อง",
+      "กิจกรรม",
+      "รายละเอียดงานที่ทำ",
+      "ชั่วโมง",
+      "สถานะ",
+    ];
+
+    const csvData = myRecords.map((r) => {
+      // ค้นหาโปรไฟล์นักศึกษาเพื่อเอาข้อมูล ชั้นและห้อง
+      const studentProfile = profiles.find(p => p.userId === r.studentId);
+      const levelRoomInfo = studentProfile ? `${studentProfile.level || '-'}/${studentProfile.room || '-'}` : '-';
+
+      // ครอบข้อความที่มีช่องว่างหรือเครื่องหมายคอมม่าด้วย "" ป้องกัน CSV เลื่อน
+      const safeTaskDesc = r.taskDescription
+        ? `"${r.taskDescription.replace(/"/g, '""')}"`
+        : "";
+      const statusThai =
+        r.status === "approved"
+          ? "อนุมัติ"
+          : r.status === "rejected"
+          ? "ไม่อนุมัติ"
+          : "รอตรวจสอบ";
+
+      return [
+        r.studentId,
+        r.studentName,
+        levelRoomInfo,
+        r.activityName,
+        safeTaskDesc,
+        r.hours,
+        statusThai,
+      ].join(",");
+    });
+
+    const csvContent = [headers.join(","), ...csvData].join("\n");
+    // เพิ่ม \uFEFF เพื่อให้รองรับภาษาไทยใน Excel
+    const blob = new Blob(["\uFEFF" + csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `report_${user.firstName}_${
+      new Date().toISOString().split("T")[0]
+    }.csv`;
+    link.click();
+  };
+
+  return (
+    <Card>
+      <div className="flex flex-col md:flex-row justify-between items-center mb-6 print:hidden gap-4">
+        <h3 className="text-xl font-bold">รายงาน</h3>
+        <div className="flex gap-2">
+          <button
+            onClick={handleExportCSV}
+            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center shadow-sm"
+          >
+            <Download size={18} className="mr-2" /> ส่งออก CSV
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 flex items-center shadow-sm"
+          >
+            <Printer size={18} className="mr-2" /> พิมพ์รายงาน
+          </button>
+        </div>
+      </div>
+
+      <div className="print:block overflow-x-auto">
+        <h2 className="hidden print:block text-2xl font-bold text-center mb-4">
+          รายงานบันทึกกิจกรรม (อ.{user.firstName})
+        </h2>
+        <table className="w-full text-left border-collapse border border-gray-300 whitespace-nowrap">
+          <thead>
+            <tr className="bg-gray-100 text-sm">
+              <th className="p-3 border">รหัส</th>
+              <th className="p-3 border">ชื่อ</th>
+              <th className="p-3 border">ชั้น/ห้อง</th>
+              <th className="p-3 border">กิจกรรม</th>
+              <th className="p-3 border text-center">ชั่วโมง</th>
+              <th className="p-3 border">สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {myRecords.map((r) => {
+              const studentProfile = profiles.find(p => p.userId === r.studentId);
+              const levelRoomInfo = studentProfile ? `${studentProfile.level || '-'}/${studentProfile.room || '-'}` : '-';
+
+              return (
+                <tr key={r.id} className="border-b">
+                  <td className="p-3 border">{r.studentId}</td>
+                  <td className="p-3 border">{r.studentName}</td>
+                  <td className="p-3 border text-gray-600">{levelRoomInfo}</td>
+                  <td className="p-3 border">{r.activityName}</td>
+                  <td className="p-3 border text-center">{r.hours}</td>
+                  <td className="p-3 border text-sm">
+                    {r.status === "approved" ? (
+                      <span className="text-green-600">อนุมัติแล้ว</span>
+                    ) : r.status === "rejected" ? (
+                      <span className="text-red-600">ไม่อนุมัติ</span>
+                    ) : (
+                      <span className="text-yellow-600">รอตรวจสอบ</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+            {myRecords.length === 0 && (
+              <tr>
+                <td colSpan="6" className="text-center p-4 text-gray-500">
+                  ไม่มีข้อมูล
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </Card>
   );
@@ -1478,121 +1709,6 @@ const StudentHistory = ({ user, records }) => {
             <p className="text-gray-500 font-medium">ยังไม่มีประวัติการทำกิจกรรม</p>
           </div>
         )}
-      </div>
-    </Card>
-  );
-};
-
-// Teacher Report Component (เพิ่มปุ่มส่งออก CSV)
-const TeacherReport = ({ user, records }) => {
-  const myRecords = records.filter((r) => r.teacherId === user.userId);
-
-  const handleExportCSV = () => {
-    const headers = [
-      "รหัสนักศึกษา",
-      "ชื่อ-นามสกุล",
-      "กิจกรรม",
-      "รายละเอียดงานที่ทำ",
-      "ชั่วโมง",
-      "สถานะ",
-    ];
-
-    const csvData = myRecords.map((r) => {
-      // ครอบข้อความที่มีช่องว่างหรือเครื่องหมายคอมม่าด้วย "" ป้องกัน CSV เลื่อน
-      const safeTaskDesc = r.taskDescription
-        ? `"${r.taskDescription.replace(/"/g, '""')}"`
-        : "";
-      const statusThai =
-        r.status === "approved"
-          ? "อนุมัติ"
-          : r.status === "rejected"
-          ? "ไม่อนุมัติ"
-          : "รอตรวจสอบ";
-
-      return [
-        r.studentId,
-        r.studentName,
-        r.activityName,
-        safeTaskDesc,
-        r.hours,
-        statusThai,
-      ].join(",");
-    });
-
-    const csvContent = [headers.join(","), ...csvData].join("\n");
-    // เพิ่ม \uFEFF เพื่อให้รองรับภาษาไทยใน Excel
-    const blob = new Blob(["\uFEFF" + csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `report_${user.firstName}_${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    link.click();
-  };
-
-  return (
-    <Card>
-      <div className="flex flex-col md:flex-row justify-between items-center mb-6 print:hidden gap-4">
-        <h3 className="text-xl font-bold">รายงาน</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={handleExportCSV}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center shadow-sm"
-          >
-            <Download size={18} className="mr-2" /> ส่งออก CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 flex items-center shadow-sm"
-          >
-            <Printer size={18} className="mr-2" /> พิมพ์รายงาน
-          </button>
-        </div>
-      </div>
-
-      <div className="print:block overflow-x-auto">
-        <h2 className="hidden print:block text-2xl font-bold text-center mb-4">
-          รายงานบันทึกกิจกรรม (อ.{user.firstName})
-        </h2>
-        <table className="w-full text-left border-collapse border border-gray-300 whitespace-nowrap">
-          <thead>
-            <tr className="bg-gray-100 text-sm">
-              <th className="p-3 border">รหัส</th>
-              <th className="p-3 border">ชื่อ</th>
-              <th className="p-3 border">กิจกรรม</th>
-              <th className="p-3 border text-center">ชั่วโมง</th>
-              <th className="p-3 border">สถานะ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {myRecords.map((r) => (
-              <tr key={r.id} className="border-b">
-                <td className="p-3 border">{r.studentId}</td>
-                <td className="p-3 border">{r.studentName}</td>
-                <td className="p-3 border">{r.activityName}</td>
-                <td className="p-3 border text-center">{r.hours}</td>
-                <td className="p-3 border text-sm">
-                  {r.status === "approved" ? (
-                    <span className="text-green-600">อนุมัติแล้ว</span>
-                  ) : r.status === "rejected" ? (
-                    <span className="text-red-600">ไม่อนุมัติ</span>
-                  ) : (
-                    <span className="text-yellow-600">รอตรวจสอบ</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {myRecords.length === 0 && (
-              <tr>
-                <td colSpan="5" className="text-center p-4 text-gray-500">
-                  ไม่มีข้อมูล
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
       </div>
     </Card>
   );
