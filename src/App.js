@@ -1070,7 +1070,7 @@ const TeacherDashboard = ({ user, activities }) => {
           </div>
         </form>
       </Card>
-      <Card title="กิจกรรมที่ฉันสร้าง">
+      <Card title="กิจกรรมที่สร้าง">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead>
