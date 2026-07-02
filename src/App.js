@@ -1713,3 +1713,76 @@ const StudentHistory = ({ user, records }) => {
     </Card>
   );
 };
+// --- Camera Barcode Scanner Component ---
+function CameraScanner({ onScan, onClose }) {
+  useEffect(() => {
+    let html5QrCode = null;
+
+    const initCamera = () => {
+      // ตรวจสอบว่ามี div สำหรับ render กล้องหรือยัง
+      const qrReaderElement = document.getElementById("qr-reader");
+      if (!qrReaderElement) return;
+
+      // ใช้ Html5Qrcode แทน Html5QrcodeScanner เพื่อข้ามหน้า UI พื้นฐาน
+      html5QrCode = new window.Html5Qrcode("qr-reader");
+      
+      html5QrCode.start(
+        { facingMode: "environment" }, // บังคับใช้กล้องหลังสำหรับสแกน
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 }
+        },
+        (decodedText) => {
+          // เมื่อสแกนสำเร็จ สั่งหยุดกล้องและส่งค่ากลับ
+          if (html5QrCode) {
+            html5QrCode.stop().then(() => {
+              html5QrCode.clear();
+              onScan(decodedText);
+            }).catch(console.error);
+          }
+        },
+        (errorMessage) => {
+          // ไม่ต้องทำอะไรกับ error ที่เกิดจากการสแกนเฟรมว่างเปล่า
+        }
+      ).catch((err) => {
+        console.error("Error starting camera:", err);
+        // หากผู้ใช้ยังไม่ได้ให้สิทธิ์กล้อง จะเข้า catch ตัวนี้
+      });
+    };
+
+    // โหลด Script หากยังไม่มีในระบบ
+    if (!window.Html5Qrcode) {
+      const script = document.createElement('script'); 
+      script.src = 'https://unpkg.com/html5-qrcode'; 
+      script.async = true; 
+      // หน่วงเวลาเล็กน้อยให้ DOM สร้างเสร็จก่อนเปิดกล้อง
+      script.onload = () => setTimeout(initCamera, 200); 
+      document.head.appendChild(script);
+    } else {
+      setTimeout(initCamera, 200);
+    }
+
+    // คืนค่าและปิดกล้องเมื่อ Component ถูกปิด
+    return () => { 
+      if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(() => html5QrCode.clear()).catch(console.error);
+      }
+    };
+  }, [onScan]);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-50 p-4">
+      <div className="bg-white p-4 rounded-xl w-full max-w-sm">
+        <h3 className="font-bold mb-4 flex justify-between items-center">
+          สแกนบาร์โค้ด 
+          <button onClick={onClose} className="text-red-500 bg-red-50 p-2 rounded-lg hover:bg-red-100">
+            <X className="w-5 h-5"/>
+          </button>
+        </h3>
+        {/* บริเวณนี้กล้องจะเปิดสตรีมสดขึ้นมาทันที */}
+        <div id="qr-reader" className="w-full overflow-hidden rounded-lg border-2 border-orange-500 bg-gray-100 flex items-center justify-center min-h-[250px]"></div>
+        <p className="text-xs text-center text-gray-500 mt-4">ระบบกำลังเปิดกล้องหลังเพื่อสแกน...</p>
+      </div>
+    </div>
+  );
+}
