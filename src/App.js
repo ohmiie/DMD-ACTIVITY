@@ -25,7 +25,10 @@ import {
   Download,
   Upload,
   Printer,
-  Award
+  Award,
+  ClipboardList,
+  Search,
+  ArrowLeft
 } from "lucide-react";
 
 // --- Firebase Initialization ---
@@ -289,6 +292,12 @@ export default function App() {
                 active={activeTab === "admin_report"}
                 onClick={() => switchTab("admin_report")}
               />
+              <SidebarButton
+                icon={<ClipboardList />}
+                label="รายงานรายบุคคล"
+                active={activeTab === "individual_report"}
+                onClick={() => switchTab("individual_report")}
+              />
             </>
           )}
           {appUser.role === "teacher" && (
@@ -351,6 +360,9 @@ export default function App() {
         )}
         {appUser.role === "admin" && activeTab === "admin_report" && (
           <AdminReport records={records} />
+        )}
+        {appUser.role === "admin" && activeTab === "individual_report" && (
+          <AdminIndividualReport profiles={profiles} records={records} activities={activities} />
         )}
 
         {/* Teacher Views */}
@@ -956,23 +968,270 @@ const AdminReport = ({ records }) => {
   );
 };
 
+// --- Individual Student Report (Admin) ---
+// The "total" mirrors StudentDashboard: approved records only.
+// หมวดกิจกรรมหลัก — เลือก 1 หมวดต่อกิจกรรม และแยกจากสถานะใน/นอกหลักสูตร
+const ACTIVITY_CATEGORIES = [
+  { value: "academic_service", label: "บริการวิชาการ" },
+  { value: "professional_service", label: "บริการวิชาชีพ" },
+  { value: "volunteer", label: "จิตอาสา" },
+  { value: "competency_training", label: "ฝึกสมรรถนะวิชาชีพ" },
+];
+const activityCategoryLabel = (value) =>
+  ACTIVITY_CATEGORIES.find((category) => category.value === value)?.label || "ยังไม่ระบุ";
+
+const activityTypeLabels = (types) => {
+  const labels = { curricular: "ในหลักสูตร", extracurricular: "นอกหลักสูตร" };
+  return (Array.isArray(types) ? types : [])
+    .map((type) => labels[type])
+    .filter(Boolean);
+};
+
+const formatActivityDate = (dateValue) => {
+  if (!dateValue) return "–";
+  const date = new Date(dateValue);
+  return Number.isNaN(date.getTime())
+    ? "–"
+    : date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+};
+
+const downloadActivityCsv = (rows, filename) => {
+  // Protect Thai characters, quoted commas and newlines in spreadsheets.
+  const csvCell = (value) => {
+    const str = String(value ?? "");
+    const safe = /^[=+@\-]/.test(str) ? "'" + str : str;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  const csvContent = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob(["\uFEFF", csvContent], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+};
+
+const AdminIndividualReport = ({ profiles, records, activities }) => {
+  const [query, setQuery] = useState("");
+  const [level, setLevel] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
+
+  const activityById = useMemo(
+    () => new Map(activities.map((activity) => [activity.id, activity])),
+    [activities]
+  );
+
+  const students = useMemo(() => {
+    const studentMap = new Map();
+    profiles.filter((profile) => profile.role === "student").forEach((profile) => {
+      studentMap.set(profile.userId, {
+        userId: profile.userId,
+        name: `${profile.firstName || ""} ${profile.lastName || ""}`.trim(),
+        level: profile.level || "",
+        room: profile.room || "",
+        records: []
+      });
+    });
+    records.forEach((record) => {
+      if (!record.studentId) return;
+      if (!studentMap.has(record.studentId)) {
+        // Preserve existing submissions if a student's profile was removed.
+        studentMap.set(record.studentId, {
+          userId: record.studentId,
+          name: record.studentName || "ไม่พบชื่อในฐานข้อมูล",
+          level: "",
+          room: "",
+          records: []
+        });
+      }
+      studentMap.get(record.studentId).records.push(record);
+    });
+    return [...studentMap.values()].map((student) => ({
+      ...student,
+      levelRoom: [student.level, student.room].filter(Boolean).join("/") || "ไม่ระบุ",
+      approvedHours: student.records
+        .filter((record) => record.status === "approved")
+        .reduce((sum, record) => sum + (Number(record.hours) || 0), 0),
+      pendingHours: student.records
+        .filter((record) => record.status === "pending")
+        .reduce((sum, record) => sum + (Number(record.hours) || 0), 0),
+      approvedCount: student.records.filter((record) => record.status === "approved").length
+    })).sort((a, b) => (a.levelRoom + a.name).localeCompare(b.levelRoom + b.name, "th"));
+  }, [profiles, records]);
+
+  const levels = useMemo(
+    () => [...new Set(students.map((student) => student.level).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th")),
+    [students]
+  );
+  const visibleStudents = useMemo(() => students.filter((student) => {
+    const searchText = `${student.userId} ${student.name} ${student.levelRoom}`.toLocaleLowerCase("th-TH");
+    return (level === "all" || student.level === level) && searchText.includes(query.trim().toLocaleLowerCase("th-TH"));
+  }), [students, level, query]);
+  const selectedStudent = students.find((student) => student.userId === selectedId);
+  const detailRecords = selectedStudent
+    ? [...selectedStudent.records].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    : [];
+  const getCategory = (record) => activityCategoryLabel(
+    record.activityCategory || activityById.get(record.activityId)?.activityCategory
+  );
+  const getTypes = (record) => activityTypeLabels(
+    Array.isArray(record.trainingTypes)
+      ? record.trainingTypes
+      : activityById.get(record.activityId)?.trainingTypes
+  );
+  const recordDate = (record) => record.activityDate || activityById.get(record.activityId)?.date || record.createdAt;
+
+  const exportSummary = () => downloadActivityCsv([
+    ["รหัสนักเรียน", "ชื่อ-นามสกุล", "ชั้น/ห้อง", "ชั่วโมงอนุมัติรวม", "ชั่วโมงรออนุมัติ", "กิจกรรมอนุมัติ", "รายการทั้งหมด"],
+    ...visibleStudents.map((student) => [student.userId, student.name, student.levelRoom, student.approvedHours, student.pendingHours, student.approvedCount, student.records.length])
+  ], "รายงานรายบุคคล_ภาพรวม.csv");
+
+  const exportDetail = () => {
+    if (!selectedStudent) return;
+    downloadActivityCsv([
+      ["รหัสนักเรียน", "ชื่อ-นามสกุล", "ชั้น/ห้อง", "วันที่จัดกิจกรรม", "ชื่อกิจกรรม", "รายละเอียดงานที่ทำ", "ครูผู้ดูแล", "หมวดกิจกรรมหลัก", "ใน/นอกหลักสูตร", "ชั่วโมง", "สถานะ"],
+      ...detailRecords.map((record) => [
+        selectedStudent.userId, selectedStudent.name, selectedStudent.levelRoom,
+        formatActivityDate(recordDate(record)), record.activityName || "", record.taskDescription || "",
+        record.teacherName || "", getCategory(record), getTypes(record).join(" / ") || "ยังไม่ระบุ", Number(record.hours) || 0,
+        record.status === "approved" ? "อนุมัติ" : record.status === "rejected" ? "ไม่อนุมัติ" : "รอตรวจสอบ"
+      ])
+    ], `รายงานรายบุคคล_${selectedStudent.userId}.csv`);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 print:hidden">
+        <div className="flex items-center gap-2">
+          {selectedStudent && (
+            <button onClick={() => setSelectedId(null)} className="p-2 bg-gray-100 rounded-lg text-gray-700 hover:bg-gray-200" aria-label="กลับไปรายชื่อ">
+              <ArrowLeft size={20} />
+            </button>
+          )}
+          <h2 className="text-2xl font-bold text-gray-800">รายงานรายบุคคล</h2>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={selectedStudent ? exportDetail : exportSummary} className="bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2 flex items-center gap-2">
+            <Download size={17} /> ส่งออก CSV
+          </button>
+          <button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2 flex items-center gap-2">
+            <Printer size={17} /> พิมพ์รายงาน
+          </button>
+        </div>
+      </div>
+
+      {selectedStudent ? (
+        <>
+          <div className="hidden print:block text-center text-xl font-bold mb-4">รายงานกิจกรรมนักเรียนรายบุคคล</div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p className="text-xs text-gray-500 mb-1">รหัสนักเรียน {selectedStudent.userId}</p>
+            <h3 className="text-2xl font-bold text-gray-800">{selectedStudent.name}</h3>
+            <p className="text-gray-500 mt-1">ชั้น/ห้อง {selectedStudent.levelRoom}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+              <div className="rounded-lg bg-green-50 p-4"><p className="text-sm text-green-700">ชั่วโมงอนุมัติรวม</p><p className="text-3xl font-bold text-green-700">{selectedStudent.approvedHours} <span className="text-sm">ชม.</span></p></div>
+              <div className="rounded-lg bg-yellow-50 p-4"><p className="text-sm text-yellow-700">ชั่วโมงรอตรวจสอบ</p><p className="text-3xl font-bold text-yellow-700">{selectedStudent.pendingHours} <span className="text-sm">ชม.</span></p></div>
+              <div className="rounded-lg bg-blue-50 p-4"><p className="text-sm text-blue-700">จำนวนรายการทั้งหมด</p><p className="text-3xl font-bold text-blue-700">{selectedStudent.records.length} <span className="text-sm">รายการ</span></p></div>
+            </div>
+          </div>
+          <Card title="รายละเอียดการบันทึกกิจกรรม">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left border-collapse text-sm">
+                <thead><tr className="bg-gray-100 text-gray-700">
+                  <th className="p-3">วันที่จัด</th><th className="p-3">กิจกรรม / รายละเอียด</th>
+                  <th className="p-3">ครูผู้ดูแล</th><th className="p-3">หมวดกิจกรรมหลัก</th>
+                  <th className="p-3">ใน/นอกหลักสูตร</th><th className="p-3 text-center">ชั่วโมง</th><th className="p-3">สถานะ</th>
+                </tr></thead>
+                <tbody>
+                  {detailRecords.map((record) => (
+                    <tr key={record.id} className="border-b align-top">
+                      <td className="p-3 whitespace-nowrap">{formatActivityDate(recordDate(record))}</td>
+                      <td className="p-3"><div className="font-semibold">{record.activityName}</div><div className="text-gray-500 mt-1 whitespace-normal">{record.taskDescription || "–"}</div></td>
+                      <td className="p-3">{record.teacherName || "–"}</td>
+                      <td className="p-3">{getCategory(record)}</td>
+                      <td className="p-3">{getTypes(record).join(" / ") || "ยังไม่ระบุ (รายการเดิม)"}</td>
+                      <td className="p-3 text-center font-bold">{Number(record.hours) || 0}</td>
+                      <td className="p-3 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs ${record.status === "approved" ? "bg-green-100 text-green-800" : record.status === "rejected" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"}`}>
+                          {record.status === "approved" ? "อนุมัติแล้ว" : record.status === "rejected" ? "ไม่อนุมัติ" : "รอตรวจสอบ"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {detailRecords.length === 0 && <tr><td colSpan="7" className="p-8 text-center text-gray-500">นักเรียนยังไม่มีประวัติบันทึกกิจกรรม</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-gray-200 p-4 shadow-sm"><p className="text-sm text-gray-500">นักเรียนทั้งหมด</p><p className="text-2xl font-bold">{students.length} คน</p></div>
+            <div className="rounded-xl border border-gray-200 p-4 shadow-sm"><p className="text-sm text-gray-500">ชั่วโมงอนุมัติรวม</p><p className="text-2xl font-bold text-green-700">{students.reduce((sum, student) => sum + student.approvedHours, 0)} ชม.</p></div>
+            <div className="rounded-xl border border-gray-200 p-4 shadow-sm"><p className="text-sm text-gray-500">รายการที่อนุมัติแล้ว</p><p className="text-2xl font-bold text-indigo-700">{students.reduce((sum, student) => sum + student.approvedCount, 0)} รายการ</p></div>
+          </div>
+          <Card>
+            <div className="flex flex-col md:flex-row gap-3 mb-5 print:hidden">
+              <div className="relative flex-1">
+                <Search size={18} className="absolute left-3 top-3 text-gray-400" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาชื่อ นามสกุล รหัส หรือชั้นเรียน" className="w-full border rounded-lg py-2 pl-10 pr-3 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+              <select value={level} onChange={(e) => setLevel(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
+                <option value="all">ทุกระดับชั้น</option>{levels.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </div>
+            <div className="hidden print:block text-center font-bold text-xl mb-4">รายงานสรุปชั่วโมงกิจกรรมนักเรียนรายบุคคล</div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[650px] text-left border-collapse">
+                <thead><tr className="bg-gray-100 text-sm text-gray-600">
+                  <th className="p-3">รหัสนักเรียน</th><th className="p-3">ชื่อ-นามสกุล</th>
+                  <th className="p-3">ชั้น/ห้อง</th><th className="p-3 text-center">ชั่วโมงอนุมัติรวม</th>
+                  <th className="p-3 text-center">รายการทั้งหมด</th><th className="p-3 text-center print:hidden">รายละเอียด</th>
+                </tr></thead>
+                <tbody>{visibleStudents.map((student) => <tr key={student.userId} className="border-b hover:bg-blue-50/50">
+                  <td className="p-3 text-gray-600">{student.userId}</td>
+                  <td className="p-3 font-medium">{student.name}</td>
+                  <td className="p-3">{student.levelRoom}</td>
+                  <td className="p-3 text-center text-green-700 font-bold">{student.approvedHours} ชม.</td>
+                  <td className="p-3 text-center">{student.records.length}</td>
+                  <td className="p-3 text-center print:hidden"><button onClick={() => setSelectedId(student.userId)} className="text-blue-700 bg-blue-50 rounded-lg px-3 py-2 hover:bg-blue-100">ดูรายละเอียด</button></td>
+                </tr>)}
+                {visibleStudents.length === 0 && <tr><td colSpan="6" className="text-center text-gray-500 p-7">ไม่พบรายชื่อนักเรียน</td></tr>}</tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-500 mt-4">* ชั่วโมงรวมคำนวณเฉพาะรายการที่ครูหรือผู้ดูแลอนุมัติแล้ว</p>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+};
+
 // --- Teacher Components ---
 const TeacherDashboard = ({ user, activities }) => {
   const today = new Date().toISOString().split("T")[0];
   const [formData, setFormData] = useState({
+    activityCategory: "",
     activityName: "",
     location: "",
     hours: 1,
     date: today,
+    trainingTypes: [],
   });
+
+  const [formError, setFormError] = useState("");
 
   // State สำหรับการแก้ไขกิจกรรม
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({
+    activityCategory: "",
     activityName: "",
     location: "",
     hours: 1,
     date: "",
+    trainingTypes: [],
   });
 
   const myActivities = useMemo(
@@ -982,22 +1241,41 @@ const TeacherDashboard = ({ user, activities }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!ACTIVITY_CATEGORIES.some((category) => category.value === formData.activityCategory)) {
+      setFormError("กรุณาเลือกหมวดกิจกรรมหลัก 1 ประเภท");
+      return;
+    }
+    if (formData.trainingTypes.length === 0) {
+      setFormError("กรุณาเลือกอย่างน้อย 1 ประเภท (ในหลักสูตร / นอกหลักสูตร)");
+      return;
+    }
+    setFormError("");
     const newId = `act_${Date.now()}`;
     await setDoc(doc(db, ACTIVITIES_PATH, newId), {
       ...formData,
       teacherId: user.userId,
       teacherName: `${user.firstName} ${user.lastName}`,
     });
-    setFormData({ activityName: "", location: "", hours: 1, date: today });
+    setFormData({ activityCategory: "", activityName: "", location: "", hours: 1, date: today, trainingTypes: [] });
   };
 
   // ฟังก์ชันบันทึกการแก้ไข
   const handleUpdate = async (id) => {
+    if (!ACTIVITY_CATEGORIES.some((category) => category.value === editData.activityCategory)) {
+      window.alert("กรุณาเลือกหมวดกิจกรรมหลัก 1 ประเภท");
+      return;
+    }
+    if (!editData.trainingTypes?.length) {
+      window.alert("กรุณาเลือกอย่างน้อย 1 ประเภทกิจกรรม");
+      return;
+    }
     await updateDoc(doc(db, ACTIVITIES_PATH, id), {
+      activityCategory: editData.activityCategory,
       activityName: editData.activityName,
       location: editData.location,
       hours: Number(editData.hours),
       date: editData.date,
+      trainingTypes: editData.trainingTypes,
     });
     setEditingId(null);
   };
@@ -1009,8 +1287,28 @@ const TeacherDashboard = ({ user, activities }) => {
           onSubmit={handleSubmit}
           className="grid grid-cols-1 md:grid-cols-4 gap-4"
         >
+          <fieldset className="md:col-span-4 p-4 rounded-xl border border-blue-200 bg-blue-50/70">
+            <legend className="px-2 font-semibold text-blue-900">1. หมวดกิจกรรมหลัก <span className="text-red-600">*</span></legend>
+            <p className="text-sm text-gray-600 mb-3">กรุณาเลือกประเภทที่ตรงกับกิจกรรม 1 ข้อ</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {ACTIVITY_CATEGORIES.map((category) => (
+                <label key={category.value} className={`flex items-center gap-2 cursor-pointer rounded-xl border p-3 bg-white transition-colors ${formData.activityCategory === category.value ? "border-blue-500 ring-2 ring-blue-200 text-blue-900" : "border-gray-200 hover:border-blue-300"}`}>
+                  <input
+                    type="radio"
+                    name="activityCategory"
+                    value={category.value}
+                    checked={formData.activityCategory === category.value}
+                    onChange={() => setFormData((previous) => ({ ...previous, activityCategory: category.value }))}
+                    className="w-5 h-5 accent-blue-600 shrink-0"
+                    required
+                  />
+                  <span className="font-medium text-sm">{category.label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <div className="md:col-span-4">
-            <label className="block text-sm mb-1">ชื่อกิจกรรม</label>
+            <label className="block text-sm mb-1">2. ชื่อกิจกรรม</label>
             <input
               type="text"
               required
@@ -1060,6 +1358,25 @@ const TeacherDashboard = ({ user, activities }) => {
               className="w-full p-2 border rounded"
             />
           </div>
+          <div className="md:col-span-4 p-4 border border-indigo-100 rounded-lg bg-indigo-50/50">
+            <p className="font-semibold text-gray-800 mb-2">การส่งเสริม สนับสนุนการฝึกประสบการณ์ สมรรถนะวิชาชีพหรือฝึกอาชีพให้กับผู้เรียน</p>
+            <p className="text-sm text-gray-500 mb-3">เลือกได้มากกว่า 1 ข้อ ให้ทำเครื่องหมาย ✓ ในช่องที่ตรงกับการดำเนินการของสถานศึกษา</p>
+            <div className="flex flex-wrap gap-5">
+              {[{ value: "curricular", label: "ในหลักสูตร" }, { value: "extracurricular", label: "นอกหลักสูตร" }].map((option) => (
+                <label key={option.value} className="flex gap-2 items-center cursor-pointer text-gray-800">
+                  <input type="checkbox" checked={formData.trainingTypes.includes(option.value)}
+                    onChange={(e) => setFormData((previous) => ({ ...previous,
+                      trainingTypes: e.target.checked
+                        ? [...previous.trainingTypes, option.value]
+                        : previous.trainingTypes.filter((type) => type !== option.value)
+                    }))}
+                    className="w-5 h-5 accent-indigo-600" />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+            {formError && <p className="text-sm text-red-600 mt-3">{formError}</p>}
+          </div>
           <div className="md:col-span-4">
             <button
               type="submit"
@@ -1076,9 +1393,11 @@ const TeacherDashboard = ({ user, activities }) => {
             <thead>
               <tr className="bg-gray-100 text-sm">
                 <th className="p-3">วันที่จัด</th>
+                <th className="p-3">หมวดกิจกรรมหลัก</th>
                 <th className="p-3">ชื่อกิจกรรม</th>
                 <th className="p-3">สถานที่</th>
                 <th className="p-3 text-center">ชั่วโมง</th>
+                <th className="p-3">ใน/นอกหลักสูตร</th>
                 <th className="p-3 text-center">จัดการ</th>
               </tr>
             </thead>
@@ -1094,6 +1413,12 @@ const TeacherDashboard = ({ user, activities }) => {
                           <input type="date" value={editData.date} onChange={(e) => setEditData({...editData, date: e.target.value})} className="w-full p-1 border rounded text-sm" />
                         </td>
                         <td className="p-2">
+                          <select value={editData.activityCategory || ""} onChange={(e) => setEditData((previous) => ({ ...previous, activityCategory: e.target.value }))} className="w-full min-w-[170px] p-1 border rounded text-sm bg-white">
+                            <option value="">-- เลือกประเภท --</option>
+                            {ACTIVITY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                          </select>
+                        </td>
+                        <td className="p-2">
                           <input type="text" value={editData.activityName} onChange={(e) => setEditData({...editData, activityName: e.target.value})} className="w-full p-1 border rounded text-sm" />
                         </td>
                         <td className="p-2">
@@ -1101,6 +1426,21 @@ const TeacherDashboard = ({ user, activities }) => {
                         </td>
                         <td className="p-2">
                           <input type="number" min="1" value={editData.hours} onChange={(e) => setEditData({...editData, hours: e.target.value})} className="w-full p-1 border rounded text-sm text-center" />
+                        </td>
+                        <td className="p-2">
+                          <div className="space-y-2 text-sm">
+                            {[{ value: "curricular", label: "ในหลักสูตร" }, { value: "extracurricular", label: "นอกหลักสูตร" }].map((option) => (
+                              <label key={option.value} className="flex items-center gap-1 whitespace-nowrap cursor-pointer">
+                                <input type="checkbox" checked={(editData.trainingTypes || []).includes(option.value)}
+                                  onChange={(e) => setEditData((previous) => ({ ...previous,
+                                    trainingTypes: e.target.checked
+                                      ? [...(previous.trainingTypes || []), option.value]
+                                      : (previous.trainingTypes || []).filter((type) => type !== option.value)
+                                  }))} />
+                                {option.label}
+                              </label>
+                            ))}
+                          </div>
                         </td>
                         <td className="p-2 text-center flex gap-2 justify-center items-center mt-1">
                           <button onClick={() => handleUpdate(a.id)} className="text-green-600 hover:text-green-800" title="บันทึก">
@@ -1117,16 +1457,18 @@ const TeacherDashboard = ({ user, activities }) => {
                         <td className="p-3 text-gray-600">
                           {new Date(a.date).toLocaleDateString("th-TH")}
                         </td>
+                        <td className="p-3 text-sm">{activityCategoryLabel(a.activityCategory)}</td>
                         <td className="p-3 font-medium">{a.activityName}</td>
                         <td className="p-3">{a.location}</td>
                         <td className="p-3 text-center text-indigo-700 font-bold">
                           {a.hours}
                         </td>
+                        <td className="p-3 text-sm">{activityTypeLabels(a.trainingTypes).join(" / ") || "ยังไม่ระบุ"}</td>
                         <td className="p-3 text-center flex gap-2 justify-center">
                           <button
                             onClick={() => {
                               setEditingId(a.id);
-                              setEditData({ activityName: a.activityName, location: a.location, hours: a.hours, date: a.date });
+                              setEditData({ activityCategory: a.activityCategory || "", activityName: a.activityName, location: a.location, hours: a.hours, date: a.date, trainingTypes: Array.isArray(a.trainingTypes) ? a.trainingTypes : [] });
                             }}
                             className="text-blue-500 hover:text-blue-700"
                             title="แก้ไข"
@@ -1349,7 +1691,7 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
   // คำนวณชั่วโมงสะสม
   const totalHours = records
     .filter((r) => r.studentId === user.userId && r.status === "approved")
-    .reduce((sum, r) => sum + r.hours, 0);
+    .reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
 
   // ฟังก์ชันคำนวณ Rank (อัพเดทใหม่)
   const getRankInfo = (hours) => {
@@ -1425,9 +1767,13 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
       studentName: `${user.firstName} ${user.lastName}`,
       activityId: currentActivityObj.id,
       activityName: currentActivityObj.activityName,
+      activityCategory: currentActivityObj.activityCategory || "",
       teacherId: currentActivityObj.teacherId,
       teacherName: currentActivityObj.teacherName,
-      hours: currentActivityObj.hours,
+      hours: Number(currentActivityObj.hours) || 0,
+      trainingTypes: Array.isArray(currentActivityObj.trainingTypes) ? currentActivityObj.trainingTypes : [],
+      activityDate: currentActivityObj.date || null,
+      location: currentActivityObj.location || "",
       taskDescription: taskDesc,
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -1566,7 +1912,7 @@ const StudentDashboard = ({ user, activities, profiles, records }) => {
             <option value="">-- 2. เลือกกิจกรรม --</option>
             {availableActivities.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.activityName} ({a.hours} ชม.)
+                {a.activityName} ({a.hours} ชม.){a.activityCategory ? ` · ${activityCategoryLabel(a.activityCategory)}` : ""}
               </option>
             ))}
           </select>
