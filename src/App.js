@@ -298,6 +298,12 @@ export default function App() {
                 active={activeTab === "individual_report"}
                 onClick={() => switchTab("individual_report")}
               />
+              <SidebarButton
+                icon={<BookOpen />}
+                label="รายงานอาจารย์"
+                active={activeTab === "teacher_report_admin"}
+                onClick={() => switchTab("teacher_report_admin")}
+              />
             </>
           )}
           {appUser.role === "teacher" && (
@@ -316,9 +322,15 @@ export default function App() {
               />
               <SidebarButton
                 icon={<Printer />}
-                label="พิมพ์รายงาน"
+                label="รายงานกิจกรรม"
                 active={activeTab === "report"}
                 onClick={() => switchTab("report")}
+              />
+              <SidebarButton
+                icon={<ClipboardList />}
+                label="รายงานรายบุคคล"
+                active={activeTab === "teacher_individual_report"}
+                onClick={() => switchTab("teacher_individual_report")}
               />
             </>
           )}
@@ -359,10 +371,14 @@ export default function App() {
           <AdminManageUsers role="student" profiles={profiles} />
         )}
         {appUser.role === "admin" && activeTab === "admin_report" && (
-          <AdminReport records={records} />
+          <AdminReport records={records} activities={activities} profiles={profiles} />
         )}
         {appUser.role === "admin" && activeTab === "individual_report" && (
-          <AdminIndividualReport profiles={profiles} records={records} activities={activities} />
+          <StudentIndividualReport profiles={profiles} records={records} activities={activities} />
+        )}
+
+        {appUser.role === "admin" && activeTab === "teacher_report_admin" && (
+          <AdminTeacherReport profiles={profiles} activities={activities} records={records} />
         )}
 
         {/* Teacher Views */}
@@ -373,7 +389,16 @@ export default function App() {
           <TeacherApprovals user={appUser} records={records} />
         )}
         {appUser.role === "teacher" && activeTab === "report" && (
-          <TeacherReport user={appUser} records={records} profiles={profiles} />
+          <TeacherReport user={appUser} records={records} profiles={profiles} activities={activities} />
+        )}
+
+        {appUser.role === "teacher" && activeTab === "teacher_individual_report" && (
+          <StudentIndividualReport
+            title="รายงานรายบุคคล (นักเรียนที่บันทึกกับอาจารย์)"
+            records={records.filter((r) => r.teacherId === appUser.userId)}
+            profiles={profiles.filter((p) => p.role === "student" && records.some((r) => r.teacherId === appUser.userId && r.studentId === p.userId))}
+            activities={activities}
+          />
         )}
 
         {/* Student Views */}
@@ -728,282 +753,56 @@ const AdminManageUsers = ({ role, profiles }) => {
   );
 };
 
-const AdminReport = ({ records }) => {
-  const [editingId, setEditingId] = useState(null);
-  const [editData, setEditData] = useState({
-    taskDescription: "",
-    hours: 0,
-    status: "pending"
-  });
-
-  const handleExportCSV = () => {
-    const headers = [
-      "อ.ผู้ดูแล",
-      "รหัสนักศึกษา",
-      "ชื่อนักศึกษา",
-      "กิจกรรม",
-      "รายละเอียดงานที่ทำ",
-      "ชั่วโมง",
-      "สถานะ",
-    ];
-
-    const csvData = records
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .map((r) => {
-        // ครอบข้อความที่มีช่องว่างหรือเครื่องหมายคอมม่าด้วย "" ป้องกัน CSV เลื่อน
-        const safeTaskDesc = r.taskDescription
-          ? `"${r.taskDescription.replace(/"/g, '""')}"`
-          : "";
-        const statusThai =
-          r.status === "approved"
-            ? "อนุมัติ"
-            : r.status === "rejected"
-            ? "ไม่อนุมัติ"
-            : "รอตรวจสอบ";
-
-        return [
-          r.teacherName,
-          r.studentId,
-          r.studentName,
-          r.activityName,
-          safeTaskDesc,
-          r.hours,
-          statusThai,
-        ].join(",");
-      });
-
-    const csvContent = [headers.join(","), ...csvData].join("\n");
-    // เพิ่ม \uFEFF เพื่อให้รองรับภาษาไทยใน Excel
-    const blob = new Blob(["\uFEFF" + csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `admin_report_all_${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    link.click();
-  };
-
-  const handleUpdateRecord = async (id) => {
-    try {
-      await updateDoc(doc(db, RECORDS_PATH, id), {
-        taskDescription: editData.taskDescription,
-        hours: Number(editData.hours),
-        status: editData.status
-      });
-      setEditingId(null);
-    } catch(err) {
-      alert("เกิดข้อผิดพลาดในการอัปเดตข้อมูล");
-    }
-  };
-
-  const handleDeleteRecord = async (id) => {
-    if (window.confirm("คุณแน่ใจหรือไม่ว่าต้องการลบรายการกิจกรรมนี้? การกระทำนี้ไม่สามารถย้อนกลับได้")) {
-      try {
-        await deleteDoc(doc(db, RECORDS_PATH, id));
-      } catch(err) {
-        alert("เกิดข้อผิดพลาดในการลบข้อมูล");
-      }
-    }
-  };
-
-  return (
-    <Card>
-      <div className="flex flex-col md:flex-row justify-between items-center mb-6 print:hidden gap-4">
-        <h3 className="text-xl font-bold text-gray-800">รายงานภาพรวมทั้งหมด</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={handleExportCSV}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center shadow-sm"
-          >
-            <Download size={18} className="mr-2" /> ส่งออก CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 flex items-center shadow-sm"
-          >
-            <Printer size={18} className="mr-2" /> พิมพ์รายงาน
-          </button>
-        </div>
-      </div>
-
-      <div className="print:block overflow-x-auto">
-        <div className="hidden print:block text-center mb-8">
-          <h2 className="text-2xl font-bold">
-            รายงานบันทึกกิจกรรมทั้งหมด (ผู้ดูแลระบบ)
-          </h2>
-        </div>
-
-        <table className="w-full text-left border-collapse border border-gray-300 whitespace-nowrap">
-          <thead>
-            <tr className="bg-gray-100 text-gray-800 text-sm">
-              <th className="p-3 border border-gray-300">อ.ผู้ดูแล</th>
-              <th className="p-3 border border-gray-300">รหัสนักศึกษา</th>
-              <th className="p-3 border border-gray-300">ชื่อนักศึกษา</th>
-              <th className="p-3 border border-gray-300">กิจกรรม</th>
-              <th className="p-3 border border-gray-300">รายละเอียดงานที่ทำ</th>
-              <th className="p-3 border border-gray-300 text-center">
-                ชั่วโมง
-              </th>
-              <th className="p-3 border border-gray-300">สถานะ</th>
-              <th className="p-3 border border-gray-300 text-center print:hidden">จัดการ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records
-              .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-              .map((r) => (
-                <tr key={r.id} className="border-b">
-                  {editingId === r.id ? (
-                    // โหมดแก้ไขกิจกรรม (Admin Edit Mode)
-                    <>
-                      <td className="p-3 border border-gray-300 text-gray-500">{r.teacherName}</td>
-                      <td className="p-3 border border-gray-300 text-gray-500">{r.studentId}</td>
-                      <td className="p-3 border border-gray-300 text-gray-500">{r.studentName}</td>
-                      <td className="p-3 border border-gray-300 text-gray-500">{r.activityName}</td>
-                      <td className="p-2 border border-gray-300">
-                        <input 
-                          type="text" 
-                          value={editData.taskDescription} 
-                          onChange={(e) => setEditData({...editData, taskDescription: e.target.value})}
-                          className="w-full p-1 border rounded text-sm min-w-[200px]"
-                        />
-                      </td>
-                      <td className="p-2 border border-gray-300 text-center">
-                        <input 
-                          type="number" 
-                          min="1" 
-                          value={editData.hours} 
-                          onChange={(e) => setEditData({...editData, hours: e.target.value})}
-                          className="w-16 p-1 border rounded text-sm text-center mx-auto"
-                        />
-                      </td>
-                      <td className="p-2 border border-gray-300">
-                        <select 
-                          value={editData.status} 
-                          onChange={(e) => setEditData({...editData, status: e.target.value})}
-                          className="w-full p-1 border rounded text-sm"
-                        >
-                          <option value="pending">รอตรวจสอบ</option>
-                          <option value="approved">อนุมัติ</option>
-                          <option value="rejected">ไม่อนุมัติ</option>
-                        </select>
-                      </td>
-                      <td className="p-2 border border-gray-300 text-center flex gap-2 justify-center items-center print:hidden">
-                        <button onClick={() => handleUpdateRecord(r.id)} className="text-green-600 hover:text-green-800" title="บันทึก">
-                          <CheckCircle size={18} />
-                        </button>
-                        <button onClick={() => setEditingId(null)} className="text-gray-500 hover:text-gray-700" title="ยกเลิก">
-                          <XCircle size={18} />
-                        </button>
-                      </td>
-                    </>
-                  ) : (
-                    // โหมดแสดงผลปกติ
-                    <>
-                      <td className="p-3 border border-gray-300 text-indigo-700 font-medium">
-                        {r.teacherName}
-                      </td>
-                      <td className="p-3 border border-gray-300">{r.studentId}</td>
-                      <td className="p-3 border border-gray-300">
-                        {r.studentName}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {r.activityName}
-                      </td>
-                      <td className="p-3 border border-gray-300 text-sm whitespace-normal min-w-[200px]">
-                        {r.taskDescription}
-                      </td>
-                      <td className="p-3 border border-gray-300 text-center font-bold">
-                        {r.hours}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-medium text-sm">
-                        {r.status === "approved" ? (
-                          <span className="text-green-600">อนุมัติ</span>
-                        ) : r.status === "rejected" ? (
-                          <span className="text-red-600">ไม่อนุมัติ</span>
-                        ) : (
-                          <span className="text-yellow-600">รอตรวจสอบ</span>
-                        )}
-                      </td>
-                      <td className="p-3 border border-gray-300 text-center flex gap-2 justify-center print:hidden">
-                        <button 
-                          onClick={() => {
-                            setEditingId(r.id);
-                            setEditData({
-                              taskDescription: r.taskDescription || "",
-                              hours: r.hours || 1,
-                              status: r.status || "pending"
-                            });
-                          }}
-                          className="text-blue-500 hover:text-blue-700"
-                          title="แก้ไขรายการ"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteRecord(r.id)}
-                          className="text-red-500 hover:text-red-700"
-                          title="ลบรายการ"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            {records.length === 0 && (
-              <tr>
-                <td colSpan="8" className="text-center p-4 text-gray-500">
-                  ไม่มีข้อมูลกิจกรรมในระบบ
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-};
-
-// --- Individual Student Report (Admin) ---
-// The "total" mirrors StudentDashboard: approved records only.
-// หมวดกิจกรรมหลัก — เลือก 1 หมวดต่อกิจกรรม และแยกจากสถานะใน/นอกหลักสูตร
+// --- Report helpers: shared by admin and teacher reports ---
 const ACTIVITY_CATEGORIES = [
   { value: "academic_service", label: "บริการวิชาการ" },
   { value: "professional_service", label: "บริการวิชาชีพ" },
   { value: "volunteer", label: "จิตอาสา" },
   { value: "competency_training", label: "ฝึกสมรรถนะวิชาชีพ" },
 ];
+const UNCLASSIFIED = "ยังไม่ระบุ";
+const COURSE_TYPES = [
+  { value: "curricular", label: "ในหลักสูตร" },
+  { value: "extracurricular", label: "นอกหลักสูตร" }
+];
 const activityCategoryLabel = (value) =>
-  ACTIVITY_CATEGORIES.find((category) => category.value === value)?.label || "ยังไม่ระบุ";
-
-const activityTypeLabels = (types) => {
-  const labels = { curricular: "ในหลักสูตร", extracurricular: "นอกหลักสูตร" };
-  return (Array.isArray(types) ? types : [])
-    .map((type) => labels[type])
-    .filter(Boolean);
-};
-
+  ACTIVITY_CATEGORIES.find((c) => c.value === value || c.label === value)?.label ||
+  (typeof value === "string" && value.trim() ? value : UNCLASSIFIED);
+const activityTypeLabels = (types) => (
+  Array.isArray(types) ? types : []
+).map((value) => COURSE_TYPES.find((type) => type.value === value || type.label === value)?.label).filter(Boolean);
+const activityLookup = (activities) => new Map(activities.map((activity) => [activity.id, activity]));
+const reportCategory = (record, lookup) => activityCategoryLabel(
+  record.activityCategory || lookup.get(record.activityId)?.activityCategory
+);
+const reportTypes = (record, lookup) => activityTypeLabels(
+  Array.isArray(record.trainingTypes) && record.trainingTypes.length
+    ? record.trainingTypes : lookup.get(record.activityId)?.trainingTypes
+);
+const reportDate = (record, lookup) => record.activityDate || lookup.get(record.activityId)?.date || record.createdAt;
+const reportHours = (record) => Number(record.hours) || 0;
+const reportStatus = (record) => record.status === "approved" ? "อนุมัติ" : record.status === "rejected" ? "ไม่อนุมัติ" : "รอตรวจสอบ";
+const approvedHours = (records) => records.reduce((total, record) =>
+  total + (record.status === "approved" ? reportHours(record) : 0), 0);
+const newestFirst = (records) => [...records].sort((a, b) =>
+  new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 const formatActivityDate = (dateValue) => {
   if (!dateValue) return "–";
   const date = new Date(dateValue);
-  return Number.isNaN(date.getTime())
-    ? "–"
-    : date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+  return Number.isNaN(date.getTime()) ? "–" : date.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 };
-
+const studentLevelRoom = (profile) => profile
+  ? [profile.level, profile.room].filter(Boolean).join("/") || "ไม่ระบุ"
+  : "ไม่ระบุ";
 const downloadActivityCsv = (rows, filename) => {
-  // Protect Thai characters, quoted commas and newlines in spreadsheets.
   const csvCell = (value) => {
     const str = String(value ?? "");
-    const safe = /^[=+@\-]/.test(str) ? "'" + str : str;
+    // Protect CSV cells from being interpreted as formulas by Excel.
+    const safe = /^[=+@\-\t\r\n]/.test(str) ? "'" + str : str;
     return `"${safe.replace(/"/g, '""')}"`;
   };
-  const csvContent = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob(["\uFEFF", csvContent], { type: "text/csv;charset=utf-8" }));
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -1012,201 +811,351 @@ const downloadActivityCsv = (rows, filename) => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 500);
 };
-
-const AdminIndividualReport = ({ profiles, records, activities }) => {
+const reportRows = (records, activities, profiles) => {
+  const lookup = activityLookup(activities);
+  const people = new Map(profiles.filter((p) => p.role === "student").map((p) => [p.userId, p]));
+  return [
+    ["วันที่", "อาจารย์ผู้ดูแล", "รหัสนักเรียน", "ชื่อ-นามสกุล", "ชั้น/ห้อง", "หมวดกิจกรรมหลัก", "ใน/นอกหลักสูตร", "ชื่อกิจกรรม", "รายละเอียดงานที่ทำ", "ชั่วโมง", "สถานะ"],
+    ...records.map((record) => [
+      formatActivityDate(reportDate(record, lookup)), record.teacherName || "", record.studentId || "",
+      record.studentName || "", studentLevelRoom(people.get(record.studentId)),
+      reportCategory(record, lookup), reportTypes(record, lookup).join(" / ") || UNCLASSIFIED,
+      record.activityName || "", record.taskDescription || "", reportHours(record), reportStatus(record)
+    ])
+  ];
+};
+const categoryStats = (records, lookup) => {
+  const categories = [
+    ...ACTIVITY_CATEGORIES.map(({ label }) => label), UNCLASSIFIED,
+    ...[...new Set(records.map((r) => reportCategory(r, lookup)))].filter((label) =>
+      !ACTIVITY_CATEGORIES.some((c) => c.label === label) && label !== UNCLASSIFIED)
+  ];
+  return categories.map((label) => {
+    const matches = records.filter((record) => reportCategory(record, lookup) === label);
+    return {
+      label, total: matches.length,
+      approved: matches.filter((r) => r.status === "approved").length,
+      pending: matches.filter((r) => r.status !== "approved" && r.status !== "rejected").length,
+      hours: approvedHours(matches)
+    };
+  });
+};
+const curriculumStats = (records, lookup) => [
+  ...COURSE_TYPES.map(({ label }) => label), UNCLASSIFIED
+].map((label) => {
+  const matches = records.filter((record) => {
+    const labels = reportTypes(record, lookup);
+    return label === UNCLASSIFIED ? labels.length === 0 : labels.includes(label);
+  });
+  return {
+    label, total: matches.length,
+    approved: matches.filter((r) => r.status === "approved").length,
+    pending: matches.filter((r) => r.status !== "approved" && r.status !== "rejected").length,
+    hours: approvedHours(matches)
+  };
+});
+const ReportBreakdown = ({ records, activities }) => {
+  const lookup = activityLookup(activities);
+  const renderStats = (items, title) => (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+      <h4 className="p-3 font-semibold bg-gray-50 text-gray-800">{title}</h4>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left min-w-[450px]">
+          <thead className="bg-gray-100 text-gray-600"><tr>
+            <th className="p-3">ประเภท</th><th className="p-3 text-center">รายการทั้งหมด</th>
+            <th className="p-3 text-center">อนุมัติแล้ว</th><th className="p-3 text-center">รอตรวจสอบ</th>
+            <th className="p-3 text-right">ชั่วโมงอนุมัติ</th>
+          </tr></thead>
+          <tbody>{items.map((item) => <tr key={item.label} className="border-t">
+            <td className="p-3 font-medium whitespace-nowrap">{item.label}</td>
+            <td className="p-3 text-center">{item.total}</td><td className="p-3 text-center">{item.approved}</td>
+            <td className="p-3 text-center">{item.pending}</td>
+            <td className="p-3 text-right font-bold text-green-700">{item.hours}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+  return <div className="space-y-3 mb-5">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="rounded-xl bg-blue-50 p-4"><p className="text-sm text-blue-800">รายการทั้งหมด</p><p className="text-2xl font-bold">{records.length}</p></div>
+      <div className="rounded-xl bg-green-50 p-4"><p className="text-sm text-green-800">ชั่วโมงอนุมัติรวม</p><p className="text-2xl font-bold">{approvedHours(records)} ชม.</p></div>
+      <div className="rounded-xl bg-amber-50 p-4"><p className="text-sm text-amber-800">รอตรวจสอบ</p><p className="text-2xl font-bold">{records.filter((r) => r.status !== "approved" && r.status !== "rejected").length} รายการ</p></div>
+    </div>
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {renderStats(categoryStats(records, lookup), "สรุปแยกตามหมวดกิจกรรมหลัก")}
+      {renderStats(curriculumStats(records, lookup), "สรุปแยกตามในหลักสูตร / นอกหลักสูตร")}
+    </div>
+    <p className="text-xs text-gray-500">* ชั่วโมงนับเฉพาะรายการอนุมัติแล้ว · กิจกรรมที่เลือกทั้งในและนอกหลักสูตรจะปรากฏทั้งสองแถว จึงไม่ควรนำยอดสองแถวนี้มาบวกกัน · รายการเดิมที่ไม่ระบุประเภทแสดงในกลุ่ม “ยังไม่ระบุ”</p>
+  </div>;
+};
+const ReportFilters = ({ search, setSearch, category, setCategory, training, setTraining, status, setStatus, extra }) => (
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-5 print:hidden">
+    <div className="lg:col-span-2 relative"><Search size={17} className="absolute left-3 top-3 text-gray-400" />
+      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ รหัส หรือกิจกรรม" className="w-full border rounded-lg p-2 pl-10" />
+    </div>
+    <select value={category} onChange={(e) => setCategory(e.target.value)} className="p-2 border rounded-lg bg-white" aria-label="กรองหมวดกิจกรรม">
+      <option value="all">ทุกหมวดกิจกรรม</option>{ACTIVITY_CATEGORIES.map((c) => <option value={c.label} key={c.value}>{c.label}</option>)}<option value={UNCLASSIFIED}>{UNCLASSIFIED}</option>
+    </select>
+    <select value={training} onChange={(e) => setTraining(e.target.value)} className="p-2 border rounded-lg bg-white" aria-label="กรองในหรือนอกหลักสูตร">
+      <option value="all">ทุกประเภทหลักสูตร</option><option value="ในหลักสูตร">ในหลักสูตร</option><option value="นอกหลักสูตร">นอกหลักสูตร</option><option value={UNCLASSIFIED}>{UNCLASSIFIED}</option>
+    </select>
+    <select value={status} onChange={(e) => setStatus(e.target.value)} className="p-2 border rounded-lg bg-white" aria-label="กรองสถานะ">
+      <option value="all">ทุกสถานะ</option><option value="approved">อนุมัติแล้ว</option><option value="pending">รอตรวจสอบ</option><option value="rejected">ไม่อนุมัติ</option>
+    </select>
+    {extra}
+  </div>
+);
+const applyReportFilters = (records, lookup, { search = "", category = "all", training = "all", status = "all", teacherId = "all" }) => {
+  const keyword = search.trim().toLocaleLowerCase("th-TH");
+  return newestFirst(records.filter((record) => {
+    const categoryLabel = reportCategory(record, lookup);
+    const types = reportTypes(record, lookup);
+    const matched = [record.studentName, record.studentId, record.teacherName, record.activityName,
+      record.taskDescription, categoryLabel, types.join(" ")].join(" ").toLocaleLowerCase("th-TH");
+    return (!keyword || matched.includes(keyword)) &&
+      (category === "all" || categoryLabel === category) &&
+      (training === "all" || (training === UNCLASSIFIED ? types.length === 0 : types.includes(training))) &&
+      (status === "all" || (status === "pending" ? record.status !== "approved" && record.status !== "rejected" : record.status === status)) &&
+      (teacherId === "all" || record.teacherId === teacherId);
+  }));
+};
+const RecordReportTable = ({ records, activities, profiles, canEdit = false }) => {
+  const [editingId, setEditingId] = useState(null);
+  const [editData, setEditData] = useState({ taskDescription: "", hours: 1, status: "pending" });
+  const lookup = activityLookup(activities);
+  const students = new Map(profiles.filter((p) => p.role === "student").map((p) => [p.userId, p]));
+  const handleSave = async (recordId) => {
+    if (!Number.isFinite(Number(editData.hours)) || Number(editData.hours) < 0) {
+      window.alert("จำนวนชั่วโมงต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป"); return;
+    }
+    try {
+      await updateDoc(doc(db, RECORDS_PATH, recordId), {
+        taskDescription: editData.taskDescription, hours: Number(editData.hours), status: editData.status
+      });
+      setEditingId(null);
+    } catch (error) { window.alert("บันทึกไม่สำเร็จ กรุณาตรวจสอบสิทธิ์และการเชื่อมต่อ"); }
+  };
+  const handleDelete = async (recordId) => {
+    if (!window.confirm("ต้องการลบรายการนี้ถาวรหรือไม่? ไม่สามารถย้อนกลับได้")) return;
+    try { await deleteDoc(doc(db, RECORDS_PATH, recordId)); }
+    catch (error) { window.alert("ลบรายการไม่สำเร็จ กรุณาตรวจสอบสิทธิ์"); }
+  };
+  return <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+    <table className="w-full min-w-[1190px] text-sm text-left border-collapse">
+      <thead className="bg-gray-100 text-gray-700"><tr>
+        <th className="p-3">วันที่จัด</th><th className="p-3">ครูผู้ดูแล</th><th className="p-3">นักเรียน / ชั้น</th>
+        <th className="p-3">หมวดกิจกรรมหลัก</th><th className="p-3">ใน/นอกหลักสูตร</th>
+        <th className="p-3">กิจกรรม / รายละเอียด</th><th className="p-3 text-center">ชั่วโมง</th><th className="p-3">สถานะ</th>
+        {canEdit && <th className="p-3 text-center print:hidden">จัดการ</th>}
+      </tr></thead>
+      <tbody>{records.map((record) => <tr key={record.id} className="border-t align-top hover:bg-gray-50">
+        <td className="p-3 whitespace-nowrap">{formatActivityDate(reportDate(record, lookup))}</td>
+        <td className="p-3">{record.teacherName || "–"}</td>
+        <td className="p-3"><div className="font-semibold">{record.studentName || "–"}</div>
+          <div className="text-xs text-gray-500">{record.studentId || "–"} · {studentLevelRoom(students.get(record.studentId))}</div></td>
+        <td className="p-3">{reportCategory(record, lookup)}</td>
+        <td className="p-3">{reportTypes(record, lookup).join(" / ") || UNCLASSIFIED}</td>
+        <td className="p-3 whitespace-normal min-w-[210px]"><div className="font-medium">{record.activityName || "–"}</div>
+          {editingId === record.id ? <textarea className="border rounded-lg p-2 mt-2 w-full" rows={2} value={editData.taskDescription} onChange={(e) => setEditData({ ...editData, taskDescription: e.target.value })} />
+            : <div className="text-gray-500 mt-1">{record.taskDescription || "–"}</div>}</td>
+        <td className="p-3 text-center font-bold">{editingId === record.id ?
+          <input type="number" min="0" className="border rounded p-1 w-20" value={editData.hours} onChange={(e) => setEditData({ ...editData, hours: e.target.value })} /> : reportHours(record)}</td>
+        <td className="p-3">{editingId === record.id ?
+          <select className="border rounded p-1" value={editData.status} onChange={(e) => setEditData({ ...editData, status: e.target.value })}>
+            <option value="approved">อนุมัติ</option><option value="pending">รอตรวจสอบ</option><option value="rejected">ไม่อนุมัติ</option>
+          </select> : <span className={record.status === "approved" ? "text-green-700 font-semibold" : record.status === "rejected" ? "text-red-600" : "text-amber-600"}>{reportStatus(record)}</span>}</td>
+        {canEdit && <td className="p-3 text-center print:hidden">
+          {editingId === record.id ? <div className="flex gap-2 justify-center">
+            <button onClick={() => handleSave(record.id)} title="บันทึก" className="text-green-700"><CheckCircle size={19} /></button>
+            <button onClick={() => setEditingId(null)} title="ยกเลิก" className="text-gray-600"><XCircle size={19} /></button>
+          </div> : <div className="flex gap-3 justify-center">
+            <button onClick={() => { setEditingId(record.id); setEditData({ taskDescription: record.taskDescription || "", hours: record.hours || 0, status: record.status || "pending" }); }} className="text-blue-600" title="แก้ไข"><Edit2 size={18} /></button>
+            <button onClick={() => handleDelete(record.id)} className="text-red-600" title="ลบ"><Trash2 size={18} /></button>
+          </div>}
+        </td>}
+      </tr>)}
+        {records.length === 0 && <tr><td colSpan={canEdit ? 9 : 8} className="text-center p-8 text-gray-500">ไม่พบข้อมูลตามเงื่อนไข</td></tr>}
+      </tbody>
+    </table>
+  </div>;
+};
+const ReportHeader = ({ title, onExport }) => <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-5 print:mb-6">
+  <h2 className="text-xl md:text-2xl font-bold text-gray-800">{title}</h2>
+  <div className="flex flex-wrap gap-2 print:hidden">
+    <button type="button" onClick={onExport} className="bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2 flex items-center gap-2"><Download size={18} /> ส่งออก CSV</button>
+    <button type="button" onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2 flex items-center gap-2"><Printer size={18} /> พิมพ์รายงาน</button>
+  </div>
+</div>;
+const AdminReport = ({ records, activities, profiles }) => {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [training, setTraining] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [teacherId, setTeacherId] = useState("all");
+  const lookup = activityLookup(activities);
+  const teachers = profiles.filter((p) => p.role === "teacher");
+  const visible = applyReportFilters(records, lookup, { search, category, training, status, teacherId });
+  return <Card>
+    <ReportHeader title="รายงานภาพรวมทั้งหมด" onExport={() => downloadActivityCsv(reportRows(visible, activities, profiles), "รายงานภาพรวมทั้งหมด.csv")} />
+    <ReportFilters {...{ search, setSearch, category, setCategory, training, setTraining, status, setStatus }} extra={
+      <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className="p-2 border rounded-lg bg-white" aria-label="กรองครูผู้ดูแล">
+        <option value="all">อาจารย์ทุกคน</option>{teachers.map((teacher) => <option key={teacher.userId} value={teacher.userId}>{teacher.firstName} {teacher.lastName}</option>)}
+      </select>
+    } />
+    <ReportBreakdown records={visible} activities={activities} />
+    <h3 className="font-bold text-lg mb-3">รายการกิจกรรมทั้งหมด ({visible.length})</h3>
+    <RecordReportTable records={visible} activities={activities} profiles={profiles} canEdit />
+  </Card>;
+};
+const AdminTeacherReport = ({ profiles, activities, records }) => {
+  const [search, setSearch] = useState("");
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [detailSearch, setDetailSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [training, setTraining] = useState("all");
+  const [status, setStatus] = useState("all");
+  const lookup = activityLookup(activities);
+  const teachersById = new Map();
+  const addTeacher = (key, name) => {
+    if (key && !teachersById.has(key)) teachersById.set(key, { key, name: name || "ไม่พบชื่ออาจารย์" });
+  };
+  profiles.filter((p) => p.role === "teacher").forEach((p) => addTeacher(p.userId, `${p.firstName || ""} ${p.lastName || ""}`.trim()));
+  activities.forEach((a) => addTeacher(a.teacherId || a.teacherName, a.teacherName));
+  records.forEach((r) => addTeacher(r.teacherId || r.teacherName, r.teacherName));
+  const teachers = [...teachersById.values()].map((teacher) => {
+    const relatedRecords = records.filter((r) => (r.teacherId || r.teacherName) === teacher.key);
+    const relatedActivities = activities.filter((a) => (a.teacherId || a.teacherName) === teacher.key);
+    return { ...teacher, records: relatedRecords, activities: relatedActivities,
+      approvedHours: approvedHours(relatedRecords), studentCount: new Set(relatedRecords.map((r) => r.studentId).filter(Boolean)).size };
+  }).sort((a, b) => a.name.localeCompare(b.name, "th"));
+  const visibleTeachers = teachers.filter((teacher) => `${teacher.key} ${teacher.name}`.toLocaleLowerCase("th-TH").includes(search.trim().toLocaleLowerCase("th-TH")));
+  const selected = teachers.find((teacher) => teacher.key === selectedKey);
+  const visible = selected ? applyReportFilters(selected.records, lookup, { search: detailSearch, category, training, status }) : [];
+  const exportTeachers = () => downloadActivityCsv([
+    ["รหัสอาจารย์", "ชื่อ-นามสกุล", "กิจกรรมที่สร้าง", "รายการบันทึก", "จำนวนนักเรียน", "ชั่วโมงอนุมัติรวม", ...ACTIVITY_CATEGORIES.map((c) => `${c.label} (ชม.)`), "ยังไม่ระบุหมวด (ชม.)", "ในหลักสูตร (ชม.)", "นอกหลักสูตร (ชม.)", "ยังไม่ระบุใน/นอกหลักสูตร (ชม.)"],
+    ...visibleTeachers.map((teacher) => {
+      const cat = categoryStats(teacher.records, lookup);
+      const types = curriculumStats(teacher.records, lookup);
+      return [teacher.key, teacher.name, teacher.activities.length, teacher.records.length, teacher.studentCount, teacher.approvedHours,
+        ...ACTIVITY_CATEGORIES.map((c) => cat.find((item) => item.label === c.label)?.hours || 0), cat.find((item) => item.label === UNCLASSIFIED)?.hours || 0,
+        ...["ในหลักสูตร", "นอกหลักสูตร", UNCLASSIFIED].map((label) => types.find((item) => item.label === label)?.hours || 0)];
+    })
+  ], "รายงานอาจารย์_ภาพรวม.csv");
+  return <Card>
+    {selected && <button onClick={() => setSelectedKey(null)} className="flex items-center gap-2 text-blue-700 mb-4 print:hidden"><ArrowLeft size={18} /> กลับไปรายชื่ออาจารย์</button>}
+    <ReportHeader title={selected ? `รายงานอาจารย์: ${selected.name}` : "รายงานอาจารย์รายบุคคล"} onExport={() => selected
+      ? downloadActivityCsv(reportRows(visible, activities, profiles), `รายงานอาจารย์_${selected.key}.csv`) : exportTeachers()} />
+    {selected ? <>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className="rounded-xl bg-indigo-50 p-4"><p className="text-sm">กิจกรรมที่สร้าง</p><p className="text-2xl font-bold">{selected.activities.length}</p></div>
+        <div className="rounded-xl bg-blue-50 p-4"><p className="text-sm">นักเรียนที่มีรายการ</p><p className="text-2xl font-bold">{selected.studentCount} คน</p></div>
+        <div className="rounded-xl bg-green-50 p-4"><p className="text-sm">ชั่วโมงนักเรียนที่อนุมัติ</p><p className="text-2xl font-bold">{selected.approvedHours} ชม.</p></div>
+      </div>
+      <ReportFilters {...{ category, setCategory, training, setTraining, status, setStatus }} search={detailSearch} setSearch={setDetailSearch} />
+      <ReportBreakdown records={visible} activities={activities} />
+      <h3 className="font-semibold mb-3">รายการบันทึกภายใต้การดูแล ({visible.length})</h3>
+      <RecordReportTable records={visible} activities={activities} profiles={profiles} />
+    </> : <>
+      <div className="mb-4 relative print:hidden"><Search size={18} className="absolute left-3 top-3 text-gray-400" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} className="w-full border rounded-lg p-2 pl-10" placeholder="ค้นหารหัสหรือชื่ออาจารย์" /></div>
+      <ReportBreakdown records={visibleTeachers.flatMap((teacher) => teacher.records)} activities={activities} />
+      <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm">
+        <thead className="bg-gray-100"><tr><th className="p-3">รหัสอาจารย์</th><th className="p-3">ชื่อ-นามสกุล</th><th className="p-3 text-center">กิจกรรมที่สร้าง</th><th className="p-3 text-center">รายการบันทึก</th><th className="p-3 text-center">นักเรียน</th><th className="p-3 text-center">ชั่วโมงอนุมัติรวม</th><th className="p-3 text-center">ในหลักสูตร</th><th className="p-3 text-center">นอกหลักสูตร</th><th className="p-3 print:hidden">รายละเอียด</th></tr></thead>
+        <tbody>{visibleTeachers.map((teacher) => <tr key={teacher.key} className="border-t"><td className="p-3">{teacher.key}</td><td className="p-3 font-semibold">{teacher.name}</td><td className="p-3 text-center">{teacher.activities.length}</td><td className="p-3 text-center">{teacher.records.length}</td><td className="p-3 text-center">{teacher.studentCount}</td><td className="p-3 text-center font-bold text-green-700">{teacher.approvedHours}</td><td className="p-3 text-center">{curriculumStats(teacher.records, lookup)[0].hours}</td><td className="p-3 text-center">{curriculumStats(teacher.records, lookup)[1].hours}</td><td className="p-3 print:hidden"><button className="text-blue-700 bg-blue-50 px-3 py-2 rounded-lg" onClick={() => { setSelectedKey(teacher.key); setCategory("all"); setTraining("all"); setStatus("all"); }}>ดูรายละเอียด</button></td></tr>)}
+        {visibleTeachers.length === 0 && <tr><td colSpan="9" className="p-7 text-center text-gray-500">ไม่พบรายชื่ออาจารย์</td></tr>}</tbody></table></div>
+      <p className="mt-4 text-xs text-gray-500">* ชั่วโมงอาจารย์ในรายงานนี้หมายถึงผลรวมชั่วโมงกิจกรรมของนักเรียนที่อนุมัติแล้ว ไม่ใช่จำนวนชั่วโมงปฏิบัติงานของอาจารย์</p>
+    </>}
+  </Card>;
+};
+const StudentIndividualReport = ({ profiles, records, activities, title = "รายงานรายบุคคล" }) => {
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
-
-  const activityById = useMemo(
-    () => new Map(activities.map((activity) => [activity.id, activity])),
-    [activities]
-  );
-
+  const [detailSearch, setDetailSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [training, setTraining] = useState("all");
+  const [status, setStatus] = useState("all");
+  const lookup = useMemo(() => activityLookup(activities), [activities]);
   const students = useMemo(() => {
-    const studentMap = new Map();
-    profiles.filter((profile) => profile.role === "student").forEach((profile) => {
-      studentMap.set(profile.userId, {
-        userId: profile.userId,
-        name: `${profile.firstName || ""} ${profile.lastName || ""}`.trim(),
-        level: profile.level || "",
-        room: profile.room || "",
-        records: []
+    const map = new Map();
+    profiles.filter((p) => p.role === "student").forEach((p) => map.set(p.userId, {
+      userId: p.userId, name: `${p.firstName || ""} ${p.lastName || ""}`.trim(),
+      level: p.level || "", room: p.room || "", records: []
+    }));
+    records.forEach((r) => {
+      if (!r.studentId) return;
+      if (!map.has(r.studentId)) map.set(r.studentId, {
+        userId: r.studentId, name: r.studentName || "ไม่พบชื่อในฐานข้อมูล", level: "", room: "", records: []
       });
+      map.get(r.studentId).records.push(r);
     });
-    records.forEach((record) => {
-      if (!record.studentId) return;
-      if (!studentMap.has(record.studentId)) {
-        // Preserve existing submissions if a student's profile was removed.
-        studentMap.set(record.studentId, {
-          userId: record.studentId,
-          name: record.studentName || "ไม่พบชื่อในฐานข้อมูล",
-          level: "",
-          room: "",
-          records: []
-        });
-      }
-      studentMap.get(record.studentId).records.push(record);
-    });
-    return [...studentMap.values()].map((student) => ({
-      ...student,
-      levelRoom: [student.level, student.room].filter(Boolean).join("/") || "ไม่ระบุ",
-      approvedHours: student.records
-        .filter((record) => record.status === "approved")
-        .reduce((sum, record) => sum + (Number(record.hours) || 0), 0),
-      pendingHours: student.records
-        .filter((record) => record.status === "pending")
-        .reduce((sum, record) => sum + (Number(record.hours) || 0), 0),
-      approvedCount: student.records.filter((record) => record.status === "approved").length
+    return [...map.values()].map((s) => ({
+      ...s, levelRoom: [s.level, s.room].filter(Boolean).join("/") || "ไม่ระบุ",
+      approvedHours: approvedHours(s.records),
+      categoryHours: categoryStats(s.records, lookup),
+      pendingHours: s.records.filter((r) => r.status !== "approved" && r.status !== "rejected").reduce((sum, r) => sum + reportHours(r), 0),
+      approvedCount: s.records.filter((r) => r.status === "approved").length
     })).sort((a, b) => (a.levelRoom + a.name).localeCompare(b.levelRoom + b.name, "th"));
-  }, [profiles, records]);
-
-  const levels = useMemo(
-    () => [...new Set(students.map((student) => student.level).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th")),
-    [students]
+  }, [profiles, records, lookup]);
+  const levels = [...new Set(students.map((s) => s.level).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th"));
+  const visibleStudents = students.filter((student) =>
+    (level === "all" || student.level === level) && `${student.userId} ${student.name} ${student.levelRoom}`.toLocaleLowerCase("th-TH").includes(query.trim().toLocaleLowerCase("th-TH"))
   );
-  const visibleStudents = useMemo(() => students.filter((student) => {
-    const searchText = `${student.userId} ${student.name} ${student.levelRoom}`.toLocaleLowerCase("th-TH");
-    return (level === "all" || student.level === level) && searchText.includes(query.trim().toLocaleLowerCase("th-TH"));
-  }), [students, level, query]);
   const selectedStudent = students.find((student) => student.userId === selectedId);
-  const detailRecords = selectedStudent
-    ? [...selectedStudent.records].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-    : [];
-  const getCategory = (record) => activityCategoryLabel(
-    record.activityCategory || activityById.get(record.activityId)?.activityCategory
-  );
-  const getTypes = (record) => activityTypeLabels(
-    Array.isArray(record.trainingTypes)
-      ? record.trainingTypes
-      : activityById.get(record.activityId)?.trainingTypes
-  );
-  const recordDate = (record) => record.activityDate || activityById.get(record.activityId)?.date || record.createdAt;
-
+  const detail = selectedStudent ? applyReportFilters(selectedStudent.records, lookup, { search: detailSearch, category, training, status }) : [];
   const exportSummary = () => downloadActivityCsv([
-    ["รหัสนักเรียน", "ชื่อ-นามสกุล", "ชั้น/ห้อง", "ชั่วโมงอนุมัติรวม", "ชั่วโมงรออนุมัติ", "กิจกรรมอนุมัติ", "รายการทั้งหมด"],
-    ...visibleStudents.map((student) => [student.userId, student.name, student.levelRoom, student.approvedHours, student.pendingHours, student.approvedCount, student.records.length])
-  ], "รายงานรายบุคคล_ภาพรวม.csv");
-
-  const exportDetail = () => {
-    if (!selectedStudent) return;
-    downloadActivityCsv([
-      ["รหัสนักเรียน", "ชื่อ-นามสกุล", "ชั้น/ห้อง", "วันที่จัดกิจกรรม", "ชื่อกิจกรรม", "รายละเอียดงานที่ทำ", "ครูผู้ดูแล", "หมวดกิจกรรมหลัก", "ใน/นอกหลักสูตร", "ชั่วโมง", "สถานะ"],
-      ...detailRecords.map((record) => [
-        selectedStudent.userId, selectedStudent.name, selectedStudent.levelRoom,
-        formatActivityDate(recordDate(record)), record.activityName || "", record.taskDescription || "",
-        record.teacherName || "", getCategory(record), getTypes(record).join(" / ") || "ยังไม่ระบุ", Number(record.hours) || 0,
-        record.status === "approved" ? "อนุมัติ" : record.status === "rejected" ? "ไม่อนุมัติ" : "รอตรวจสอบ"
-      ])
-    ], `รายงานรายบุคคล_${selectedStudent.userId}.csv`);
-  };
-
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 print:hidden">
-        <div className="flex items-center gap-2">
-          {selectedStudent && (
-            <button onClick={() => setSelectedId(null)} className="p-2 bg-gray-100 rounded-lg text-gray-700 hover:bg-gray-200" aria-label="กลับไปรายชื่อ">
-              <ArrowLeft size={20} />
-            </button>
-          )}
-          <h2 className="text-2xl font-bold text-gray-800">รายงานรายบุคคล</h2>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={selectedStudent ? exportDetail : exportSummary} className="bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2 flex items-center gap-2">
-            <Download size={17} /> ส่งออก CSV
-          </button>
-          <button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2 flex items-center gap-2">
-            <Printer size={17} /> พิมพ์รายงาน
-          </button>
-        </div>
+    ["รหัสนักเรียน", "ชื่อ-นามสกุล", "ชั้น/ห้อง", "ชั่วโมงอนุมัติรวม", ...ACTIVITY_CATEGORIES.map((c) => `${c.label} (ชม.)`), "ยังไม่ระบุหมวด (ชม.)", "ในหลักสูตร (ชม.)", "นอกหลักสูตร (ชม.)", "ยังไม่ระบุใน/นอกหลักสูตร (ชม.)", "ชั่วโมงรอตรวจสอบ", "จำนวนรายการทั้งหมด"],
+    ...visibleStudents.map((s) => [s.userId, s.name, s.levelRoom, s.approvedHours,
+      ...ACTIVITY_CATEGORIES.map((c) => s.categoryHours.find((item) => item.label === c.label)?.hours || 0),
+      s.categoryHours.find((item) => item.label === UNCLASSIFIED)?.hours || 0,
+      ...["ในหลักสูตร", "นอกหลักสูตร", UNCLASSIFIED].map((label) => curriculumStats(s.records, lookup).find((item) => item.label === label)?.hours || 0),
+      s.pendingHours, s.records.length])
+  ], "รายงานนักเรียนรายบุคคล_ภาพรวม.csv");
+  const exportDetail = () => downloadActivityCsv(reportRows(detail, activities, profiles), `รายงานนักเรียน_${selectedStudent.userId}.csv`);
+  return <div className="space-y-5">
+    {selectedStudent && <button onClick={() => { setSelectedId(null); setCategory("all"); setTraining("all"); setStatus("all"); }} className="flex items-center gap-2 text-blue-700 print:hidden"><ArrowLeft size={18} /> กลับไปรายชื่อนักเรียน</button>}
+    <ReportHeader title={selectedStudent ? `${title}: ${selectedStudent.name}` : title} onExport={selectedStudent ? exportDetail : exportSummary} />
+    {selectedStudent ? <>
+      <Card><p className="text-gray-500">รหัสนักเรียน {selectedStudent.userId} · ชั้น/ห้อง {selectedStudent.levelRoom}</p>
+        <p className="text-xl font-bold mt-2">{selectedStudent.name}</p>
+        <div className="flex flex-wrap gap-4 mt-3"><span className="font-bold text-green-700">ชั่วโมงอนุมัติรวม {selectedStudent.approvedHours} ชม.</span><span>รอตรวจสอบ {selectedStudent.pendingHours} ชม.</span><span>ทั้งหมด {selectedStudent.records.length} รายการ</span></div>
+      </Card>
+      <Card>
+        <ReportFilters {...{ category, setCategory, training, setTraining, status, setStatus }} search={detailSearch} setSearch={setDetailSearch} />
+        <ReportBreakdown records={detail} activities={activities} />
+        <h3 className="font-semibold mb-3">รายละเอียดกิจกรรม ({detail.length} รายการ)</h3>
+        <RecordReportTable records={detail} activities={activities} profiles={profiles} />
+      </Card>
+    </> : <>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-4 rounded-xl bg-blue-50"><p className="text-sm">นักเรียนทั้งหมด</p><p className="text-2xl font-bold">{students.length} คน</p></div>
+        <div className="p-4 rounded-xl bg-green-50"><p className="text-sm">ชั่วโมงอนุมัติรวม</p><p className="text-2xl font-bold">{students.reduce((total, s) => total + s.approvedHours, 0)} ชม.</p></div>
+        <div className="p-4 rounded-xl bg-indigo-50"><p className="text-sm">รายการที่อนุมัติแล้ว</p><p className="text-2xl font-bold">{students.reduce((total, s) => total + s.approvedCount, 0)} รายการ</p></div>
       </div>
-
-      {selectedStudent ? (
-        <>
-          <div className="hidden print:block text-center text-xl font-bold mb-4">รายงานกิจกรรมนักเรียนรายบุคคล</div>
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <p className="text-xs text-gray-500 mb-1">รหัสนักเรียน {selectedStudent.userId}</p>
-            <h3 className="text-2xl font-bold text-gray-800">{selectedStudent.name}</h3>
-            <p className="text-gray-500 mt-1">ชั้น/ห้อง {selectedStudent.levelRoom}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
-              <div className="rounded-lg bg-green-50 p-4"><p className="text-sm text-green-700">ชั่วโมงอนุมัติรวม</p><p className="text-3xl font-bold text-green-700">{selectedStudent.approvedHours} <span className="text-sm">ชม.</span></p></div>
-              <div className="rounded-lg bg-yellow-50 p-4"><p className="text-sm text-yellow-700">ชั่วโมงรอตรวจสอบ</p><p className="text-3xl font-bold text-yellow-700">{selectedStudent.pendingHours} <span className="text-sm">ชม.</span></p></div>
-              <div className="rounded-lg bg-blue-50 p-4"><p className="text-sm text-blue-700">จำนวนรายการทั้งหมด</p><p className="text-3xl font-bold text-blue-700">{selectedStudent.records.length} <span className="text-sm">รายการ</span></p></div>
-            </div>
-          </div>
-          <Card title="รายละเอียดการบันทึกกิจกรรม">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left border-collapse text-sm">
-                <thead><tr className="bg-gray-100 text-gray-700">
-                  <th className="p-3">วันที่จัด</th><th className="p-3">กิจกรรม / รายละเอียด</th>
-                  <th className="p-3">ครูผู้ดูแล</th><th className="p-3">หมวดกิจกรรมหลัก</th>
-                  <th className="p-3">ใน/นอกหลักสูตร</th><th className="p-3 text-center">ชั่วโมง</th><th className="p-3">สถานะ</th>
-                </tr></thead>
-                <tbody>
-                  {detailRecords.map((record) => (
-                    <tr key={record.id} className="border-b align-top">
-                      <td className="p-3 whitespace-nowrap">{formatActivityDate(recordDate(record))}</td>
-                      <td className="p-3"><div className="font-semibold">{record.activityName}</div><div className="text-gray-500 mt-1 whitespace-normal">{record.taskDescription || "–"}</div></td>
-                      <td className="p-3">{record.teacherName || "–"}</td>
-                      <td className="p-3">{getCategory(record)}</td>
-                      <td className="p-3">{getTypes(record).join(" / ") || "ยังไม่ระบุ (รายการเดิม)"}</td>
-                      <td className="p-3 text-center font-bold">{Number(record.hours) || 0}</td>
-                      <td className="p-3 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs ${record.status === "approved" ? "bg-green-100 text-green-800" : record.status === "rejected" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"}`}>
-                          {record.status === "approved" ? "อนุมัติแล้ว" : record.status === "rejected" ? "ไม่อนุมัติ" : "รอตรวจสอบ"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {detailRecords.length === 0 && <tr><td colSpan="7" className="p-8 text-center text-gray-500">นักเรียนยังไม่มีประวัติบันทึกกิจกรรม</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-xl border border-gray-200 p-4 shadow-sm"><p className="text-sm text-gray-500">นักเรียนทั้งหมด</p><p className="text-2xl font-bold">{students.length} คน</p></div>
-            <div className="rounded-xl border border-gray-200 p-4 shadow-sm"><p className="text-sm text-gray-500">ชั่วโมงอนุมัติรวม</p><p className="text-2xl font-bold text-green-700">{students.reduce((sum, student) => sum + student.approvedHours, 0)} ชม.</p></div>
-            <div className="rounded-xl border border-gray-200 p-4 shadow-sm"><p className="text-sm text-gray-500">รายการที่อนุมัติแล้ว</p><p className="text-2xl font-bold text-indigo-700">{students.reduce((sum, student) => sum + student.approvedCount, 0)} รายการ</p></div>
-          </div>
-          <Card>
-            <div className="flex flex-col md:flex-row gap-3 mb-5 print:hidden">
-              <div className="relative flex-1">
-                <Search size={18} className="absolute left-3 top-3 text-gray-400" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาชื่อ นามสกุล รหัส หรือชั้นเรียน" className="w-full border rounded-lg py-2 pl-10 pr-3 focus:outline-none focus:ring-2 focus:ring-blue-400" />
-              </div>
-              <select value={level} onChange={(e) => setLevel(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
-                <option value="all">ทุกระดับชั้น</option>{levels.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </div>
-            <div className="hidden print:block text-center font-bold text-xl mb-4">รายงานสรุปชั่วโมงกิจกรรมนักเรียนรายบุคคล</div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[650px] text-left border-collapse">
-                <thead><tr className="bg-gray-100 text-sm text-gray-600">
-                  <th className="p-3">รหัสนักเรียน</th><th className="p-3">ชื่อ-นามสกุล</th>
-                  <th className="p-3">ชั้น/ห้อง</th><th className="p-3 text-center">ชั่วโมงอนุมัติรวม</th>
-                  <th className="p-3 text-center">รายการทั้งหมด</th><th className="p-3 text-center print:hidden">รายละเอียด</th>
-                </tr></thead>
-                <tbody>{visibleStudents.map((student) => <tr key={student.userId} className="border-b hover:bg-blue-50/50">
-                  <td className="p-3 text-gray-600">{student.userId}</td>
-                  <td className="p-3 font-medium">{student.name}</td>
-                  <td className="p-3">{student.levelRoom}</td>
-                  <td className="p-3 text-center text-green-700 font-bold">{student.approvedHours} ชม.</td>
-                  <td className="p-3 text-center">{student.records.length}</td>
-                  <td className="p-3 text-center print:hidden"><button onClick={() => setSelectedId(student.userId)} className="text-blue-700 bg-blue-50 rounded-lg px-3 py-2 hover:bg-blue-100">ดูรายละเอียด</button></td>
-                </tr>)}
-                {visibleStudents.length === 0 && <tr><td colSpan="6" className="text-center text-gray-500 p-7">ไม่พบรายชื่อนักเรียน</td></tr>}</tbody>
-              </table>
-            </div>
-            <p className="text-xs text-gray-500 mt-4">* ชั่วโมงรวมคำนวณเฉพาะรายการที่ครูหรือผู้ดูแลอนุมัติแล้ว</p>
-          </Card>
-        </>
-      )}
-    </div>
-  );
+      <Card>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 print:hidden">
+          <div className="relative"><Search size={17} className="absolute top-3 left-3 text-gray-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="w-full p-2 pl-10 border rounded-lg" placeholder="ค้นหาชื่อ รหัส หรือชั้นเรียน" /></div>
+          <select value={level} onChange={(e) => setLevel(e.target.value)} className="border rounded-lg p-2"><option value="all">ทุกระดับชั้น</option>{levels.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+        </div>
+        <h3 className="font-semibold mb-3">ตารางชั่วโมงกิจกรรมนักเรียนแยกตาม 4 หมวด</h3>
+        <div className="overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-sm"><thead className="bg-gray-100"><tr>
+          <th className="p-3">รหัส</th><th className="p-3">ชื่อ-นามสกุล</th><th className="p-3">ชั้น/ห้อง</th>
+          {ACTIVITY_CATEGORIES.map((c) => <th key={c.value} className="p-3 text-center">{c.label}</th>)}
+          <th className="p-3 text-center">ยังไม่ระบุ</th><th className="p-3 text-center">ในหลักสูตร</th><th className="p-3 text-center">นอกหลักสูตร</th><th className="p-3 text-center">รวมอนุมัติ</th><th className="p-3 text-center">จำนวนรายการ</th><th className="p-3 print:hidden">รายละเอียด</th>
+        </tr></thead><tbody>{visibleStudents.map((s) => <tr key={s.userId} className="border-t hover:bg-blue-50/40">
+          <td className="p-3">{s.userId}</td><td className="p-3 font-medium">{s.name}</td><td className="p-3">{s.levelRoom}</td>
+          {ACTIVITY_CATEGORIES.map((c) => <td key={c.value} className="p-3 text-center">{s.categoryHours.find((item) => item.label === c.label)?.hours || 0}</td>)}
+          <td className="p-3 text-center">{s.categoryHours.find((item) => item.label === UNCLASSIFIED)?.hours || 0}</td>
+          <td className="p-3 text-center">{curriculumStats(s.records, lookup)[0].hours}</td><td className="p-3 text-center">{curriculumStats(s.records, lookup)[1].hours}</td>
+          <td className="p-3 text-center font-bold text-green-700">{s.approvedHours}</td><td className="p-3 text-center">{s.records.length}</td>
+          <td className="p-3 print:hidden"><button className="bg-blue-50 text-blue-700 rounded-lg px-3 py-2" onClick={() => { setSelectedId(s.userId); setCategory("all"); setTraining("all"); setStatus("all"); }}>ดูรายละเอียด</button></td>
+        </tr>)}{visibleStudents.length === 0 && <tr><td colSpan="12" className="text-center p-8 text-gray-500">ไม่พบรายชื่อนักเรียน</td></tr>}</tbody></table></div>
+        <p className="text-xs text-gray-500 mt-3">* ชั่วโมงรวมของนักเรียนเป็นชั่วโมงที่อนุมัติแล้วเท่านั้น รายการเดิมที่ไม่มีหมวดจะอยู่ในคอลัมน์ “ยังไม่ระบุ”</p>
+      </Card>
+      <ReportBreakdown records={visibleStudents.flatMap((s) => s.records)} activities={activities} />
+    </>}
+  </div>;
 };
 
 // --- Teacher Components ---
@@ -1549,132 +1498,22 @@ const TeacherApprovals = ({ user, records }) => {
   );
 };
 
-// Teacher Report Component (เพิ่มชั้น/ห้อง และรับ props `profiles` มาใช้งาน)
-const TeacherReport = ({ user, records, profiles }) => {
-  const myRecords = records.filter((r) => r.teacherId === user.userId);
-
-  const handleExportCSV = () => {
-    const headers = [
-      "รหัสนักศึกษา",
-      "ชื่อ-นามสกุล",
-      "ชั้น/ห้อง",
-      "กิจกรรม",
-      "รายละเอียดงานที่ทำ",
-      "ชั่วโมง",
-      "สถานะ",
-    ];
-
-    const csvData = myRecords.map((r) => {
-      // ค้นหาโปรไฟล์นักศึกษาเพื่อเอาข้อมูล ชั้นและห้อง
-      const studentProfile = profiles.find(p => p.userId === r.studentId);
-      const levelRoomInfo = studentProfile ? `${studentProfile.level || '-'}/${studentProfile.room || '-'}` : '-';
-
-      // ครอบข้อความที่มีช่องว่างหรือเครื่องหมายคอมม่าด้วย "" ป้องกัน CSV เลื่อน
-      const safeTaskDesc = r.taskDescription
-        ? `"${r.taskDescription.replace(/"/g, '""')}"`
-        : "";
-      const statusThai =
-        r.status === "approved"
-          ? "อนุมัติ"
-          : r.status === "rejected"
-          ? "ไม่อนุมัติ"
-          : "รอตรวจสอบ";
-
-      return [
-        r.studentId,
-        r.studentName,
-        levelRoomInfo,
-        r.activityName,
-        safeTaskDesc,
-        r.hours,
-        statusThai,
-      ].join(",");
-    });
-
-    const csvContent = [headers.join(","), ...csvData].join("\n");
-    // เพิ่ม \uFEFF เพื่อให้รองรับภาษาไทยใน Excel
-    const blob = new Blob(["\uFEFF" + csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `report_${user.firstName}_${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    link.click();
-  };
-
-  return (
-    <Card>
-      <div className="flex flex-col md:flex-row justify-between items-center mb-6 print:hidden gap-4">
-        <h3 className="text-xl font-bold">รายงาน</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={handleExportCSV}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center shadow-sm"
-          >
-            <Download size={18} className="mr-2" /> ส่งออก CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 flex items-center shadow-sm"
-          >
-            <Printer size={18} className="mr-2" /> พิมพ์รายงาน
-          </button>
-        </div>
-      </div>
-
-      <div className="print:block overflow-x-auto">
-        <h2 className="hidden print:block text-2xl font-bold text-center mb-4">
-          รายงานบันทึกกิจกรรม (อ.{user.firstName})
-        </h2>
-        <table className="w-full text-left border-collapse border border-gray-300 whitespace-nowrap">
-          <thead>
-            <tr className="bg-gray-100 text-sm">
-              <th className="p-3 border">รหัส</th>
-              <th className="p-3 border">ชื่อ</th>
-              <th className="p-3 border">ชั้น/ห้อง</th>
-              <th className="p-3 border">กิจกรรม</th>
-              <th className="p-3 border text-center">ชั่วโมง</th>
-              <th className="p-3 border">สถานะ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {myRecords.map((r) => {
-              const studentProfile = profiles.find(p => p.userId === r.studentId);
-              const levelRoomInfo = studentProfile ? `${studentProfile.level || '-'}/${studentProfile.room || '-'}` : '-';
-
-              return (
-                <tr key={r.id} className="border-b">
-                  <td className="p-3 border">{r.studentId}</td>
-                  <td className="p-3 border">{r.studentName}</td>
-                  <td className="p-3 border text-gray-600">{levelRoomInfo}</td>
-                  <td className="p-3 border">{r.activityName}</td>
-                  <td className="p-3 border text-center">{r.hours}</td>
-                  <td className="p-3 border text-sm">
-                    {r.status === "approved" ? (
-                      <span className="text-green-600">อนุมัติแล้ว</span>
-                    ) : r.status === "rejected" ? (
-                      <span className="text-red-600">ไม่อนุมัติ</span>
-                    ) : (
-                      <span className="text-yellow-600">รอตรวจสอบ</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-            {myRecords.length === 0 && (
-              <tr>
-                <td colSpan="6" className="text-center p-4 text-gray-500">
-                  ไม่มีข้อมูล
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
+// Teacher report: only records associated with the logged-in teacher.
+const TeacherReport = ({ user, records, profiles, activities }) => {
+  const myRecords = records.filter((record) => record.teacherId === user.userId);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [training, setTraining] = useState("all");
+  const [status, setStatus] = useState("all");
+  const visible = applyReportFilters(myRecords, activityLookup(activities), { search, category, training, status });
+  return <Card>
+    <ReportHeader title={`รายงานกิจกรรม (อ.${user.firstName} ${user.lastName})`}
+      onExport={() => downloadActivityCsv(reportRows(visible, activities, profiles), `รายงานกิจกรรมอาจารย์_${user.userId}.csv`)} />
+    <ReportFilters {...{ search, setSearch, category, setCategory, training, setTraining, status, setStatus }} />
+    <ReportBreakdown records={visible} activities={activities} />
+    <h3 className="font-bold text-lg mb-3">รายการบันทึกกิจกรรม ({visible.length})</h3>
+    <RecordReportTable records={visible} activities={activities} profiles={profiles} />
+  </Card>;
 };
 
 // --- Student Components ---
